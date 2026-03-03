@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Save, Plus, X, ListPlus } from 'lucide-react';
 import type { RubricWeight } from '@/lib/types';
 
 const DEFAULT_RUBRIC: RubricWeight[] = [
@@ -81,138 +83,196 @@ export default function NewAssignment() {
     router.push(`/teacher/a/${data.id}`);
   }
 
+  const totalWeight = rubric.reduce((s, r) => s + r.weight, 0);
+
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">New Assignment</h1>
-        <button
-          type="button"
-          onClick={() => router.push('/teacher/dashboard')}
-          className="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition"
+    <div className="min-h-screen bg-slate-50 pb-12">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-3xl mx-auto px-6 h-16 flex items-center">
+          <button
+            type="button"
+            onClick={() => router.push('/teacher/dashboard')}
+            className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Dashboard</span>
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-6 py-8">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
         >
-          ← Back to Dashboard
-        </button>
-      </div>
+          <div className="bg-slate-50/50 border-b border-slate-100 px-8 py-6">
+            <h1 className="text-2xl font-bold text-slate-800">Create New Assignment</h1>
+            <p className="text-slate-500 mt-1">Configure an AI assessment for your students.</p>
+          </div>
 
-      <form onSubmit={handleCreate} className="space-y-5">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
-          <input
-            required
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            placeholder="e.g., Data Structures Midterm"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Topic</label>
-            <input
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder="e.g., Binary Trees"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Difficulty</label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            >
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Time Limit (min)</label>
-            <input
-              type="number"
-              min={1}
-              max={30}
-              value={timeLimitMin}
-              onChange={(e) => setTimeLimitMin(Number(e.target.value))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Max Turns</label>
-            <input
-              type="number"
-              min={3}
-              max={20}
-              value={maxTurns}
-              onChange={(e) => setMaxTurns(Number(e.target.value))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <label className="block text-sm font-medium text-gray-700">Rubric Weights (must sum to 100)</label>
-            <button
-              type="button"
-              onClick={addRubricCategory}
-              className="text-sm text-blue-600 hover:text-blue-700"
-            >
-              + Add Category
-            </button>
-          </div>
-          <div className="space-y-2">
-            {rubric.map((r, i) => (
-              <div key={i} className="flex gap-2 items-center">
+          <form onSubmit={handleCreate} className="p-8 space-y-8">
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Assignment Title <span className="text-red-500">*</span></label>
                 <input
-                  value={r.category}
-                  onChange={(e) => {
-                    const updated = [...rubric];
-                    updated[i] = { ...updated[i], category: e.target.value };
-                    setRubric(updated);
-                  }}
-                  placeholder="Category name"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all outline-none"
+                  placeholder="e.g., Data Structures Midterm"
                 />
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={r.weight}
-                  onChange={(e) => updateRubricWeight(i, Number(e.target.value))}
-                  className="w-20 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-                <span className="text-sm text-gray-500">%</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Focus Topic</label>
+                  <input
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all outline-none"
+                    placeholder="e.g., Binary Trees"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Difficulty Level</label>
+                  <div className="relative">
+                    <select
+                      value={difficulty}
+                      onChange={(e) => setDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all outline-none appearance-none"
+                    >
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+                      <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" /></svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Time Limit (minutes)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={timeLimitMin}
+                    onChange={(e) => setTimeLimitMin(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all outline-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-1.5">Max allowed time for the entire oral assessment</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Max Interview Turns</label>
+                  <input
+                    type="number"
+                    min={3}
+                    max={20}
+                    value={maxTurns}
+                    onChange={(e) => setMaxTurns(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all outline-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-1.5">A turn is one message from AI + one from student</p>
+                </div>
+              </div>
+            </div>
+
+            <hr className="border-slate-100" />
+
+            <div>
+              <div className="flex justify-between items-end mb-4">
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                    <ListPlus className="w-4 h-4 text-sky-600" />
+                    Grading Rubric
+                  </label>
+                  <p className="text-xs text-slate-500 mt-1">Weights must sum to exactly 100%.</p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => removeRubricCategory(i)}
-                  className="text-red-500 hover:text-red-700 text-sm"
+                  onClick={addRubricCategory}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100 px-3 py-1.5 rounded-lg transition-colors"
                 >
-                  ✕
+                  <Plus className="w-4 h-4" />
+                  Add Category
                 </button>
               </div>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Total: {rubric.reduce((s, r) => s + r.weight, 0)}%
-          </p>
-        </div>
 
-        {error && <p className="text-red-600 text-sm">{error}</p>}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-2">
+                {rubric.map((r, i) => (
+                  <div key={i} className="flex gap-2 items-center bg-white p-2 rounded-lg border border-slate-100 shadow-sm">
+                    <input
+                      value={r.category}
+                      onChange={(e) => {
+                        const updated = [...rubric];
+                        updated[i] = { ...updated[i], category: e.target.value };
+                        setRubric(updated);
+                      }}
+                      placeholder="Category name"
+                      className="flex-1 px-3 py-2 bg-transparent border-none text-sm focus:ring-0 outline-none placeholder:text-slate-400 font-medium text-slate-700"
+                    />
+                    <div className="w-px h-6 bg-slate-200"></div>
+                    <div className="relative flex items-center pr-3">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={r.weight}
+                        onChange={(e) => updateRubricWeight(i, Number(e.target.value))}
+                        className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-md text-sm text-center focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                      />
+                      <span className="text-sm font-medium text-slate-400 ml-1.5">%</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeRubricCategory(i)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end mt-3">
+                <span className={`text-sm font-semibold px-3 py-1 rounded-full ${totalWeight === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                  Total Weight: {totalWeight}%
+                </span>
+              </div>
+            </div>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition"
-        >
-          {saving ? 'Creating...' : 'Create Assignment'}
-        </button>
-      </form>
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+                <div className="shrink-0 mt-0.5"><X className="w-4 h-4" /></div>
+                <p>{error}</p>
+              </div>
+            )}
+
+            <div className="pt-4 flex justify-end">
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-sky-600 text-white rounded-xl font-medium hover:bg-sky-700 disabled:opacity-50 transition-all shadow-sm shadow-sky-600/20 hover:shadow-md"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Create Assignment
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </motion.div>
+      </main>
     </div>
   );
 }

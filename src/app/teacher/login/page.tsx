@@ -37,15 +37,15 @@ export default function TeacherLogin() {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900 text-center">Teacher Login</h1>
-        <p className="text-sm text-gray-600 text-center">
+        <h1 className="text-2xl font-bold text-slate-800 text-center">Teacher Login</h1>
+        <p className="text-sm text-slate-600 text-center">
           Sign in with your Google account to access teacher tools.
         </p>
         {error && <p className="text-red-600 text-sm">{error}</p>}
         <button
           onClick={handleGoogleLogin}
           disabled={loading}
-          className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition"
+          className="w-full py-2 bg-sky-600 text-white rounded-md hover:bg-sky-700 disabled:opacity-50 transition"
         >
           {loading ? 'Redirecting...' : 'Continue with Google'}
         </button>

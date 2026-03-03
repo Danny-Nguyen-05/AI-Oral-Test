@@ -6,6 +6,11 @@ import { useRecording } from '@/hooks/useRecording';
 import { useIntegrity } from '@/hooks/useIntegrity';
 import MarkdownMessage from '@/components/MarkdownMessage';
 import { supabase } from '@/lib/supabase/client';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Video, Mic, AlertTriangle, Send, CheckCircle2, Clock,
+  MessageSquare, UserCircle, ShieldAlert, Sparkles, Loader2, Maximize, StopCircle
+} from 'lucide-react';
 
 type Phase = 'consent' | 'interview' | 'uploading' | 'finalizing' | 'done';
 
@@ -128,7 +133,7 @@ export default function AttemptPage() {
   useEffect(() => {
     if (!isRecording) return;
     if (duration >= timeLimitSeconds) {
-      handleSubmit();
+      void handleSubmit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duration, timeLimitSeconds, isRecording]);
@@ -257,7 +262,6 @@ export default function AttemptPage() {
         const assignmentId = typeof parsed?.assignmentId === 'string' ? parsed.assignmentId : '';
         if (!assignmentId) return;
 
-        // Fetch from public_assignments view using supabase client
         const { createClient } = await import('@supabase/supabase-js');
         const supabase = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -311,14 +315,12 @@ export default function AttemptPage() {
     const fullscreenOk = await requestFullscreenMode();
     if (!fullscreenOk) return;
 
-    // Update status to ready_to_start, then recording
     await updateStatus('ready_to_start');
     await startRecording();
     await updateStatus('recording');
     setPhase('interview');
 
-    // Send initial AI turn to get the first question
-    await sendAITurn('Hello, I am ready to begin the assessment.');
+    void sendAITurn('Hello, I am ready to begin the assessment.');
   }
 
   async function sendAITurn(message: string, options: SendAITurnOptions = {}) {
@@ -326,7 +328,6 @@ export default function AttemptPage() {
     setError('');
 
     try {
-      // Add student message to chat
       if (!options.skipStudentChat && message !== 'Hello, I am ready to begin the assessment.') {
         setChat((prev) => [...prev, { role: 'student', content: message }]);
       }
@@ -381,7 +382,7 @@ export default function AttemptPage() {
     const msg = speechDraft.trim();
     setSpeechDraft('');
     finalTranscriptRef.current = '';
-    sendAITurn(msg);
+    void sendAITurn(msg);
   }
 
   function startListening() {
@@ -465,7 +466,6 @@ export default function AttemptPage() {
     let progressInterval: ReturnType<typeof setInterval> | null = null;
 
     try {
-      // Stop recording
       const blob = await stopRecording();
       if (!blob) {
         setError('No recording data available');
@@ -474,11 +474,8 @@ export default function AttemptPage() {
       }
 
       recordingBlobRef.current = blob;
-
-      // Update status to uploading
       await updateStatus('uploading_recording');
 
-      // Upload recording directly from client to Supabase Storage
       const parsed = getStoredAttemptData();
       const assignmentId = typeof parsed?.assignmentId === 'string' ? parsed.assignmentId : '';
 
@@ -489,7 +486,6 @@ export default function AttemptPage() {
       const recordingExt = 'webm';
       const storagePath = `${assignmentId}/${attemptId}.${recordingExt}`;
 
-      // Simulated progress
       progressInterval = setInterval(() => {
         setUploadProgress((prev) => Math.min(prev + 10, 90));
       }, 500);
@@ -523,8 +519,6 @@ export default function AttemptPage() {
       if (!res.ok) throw new Error(data.error);
 
       setUploadProgress(100);
-
-      // Now finalize grading
       setPhase('finalizing');
 
       const finalRes = await fetch('/api/ai/finalize', {
@@ -541,14 +535,13 @@ export default function AttemptPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
       setPhase('interview');
-      await updateStatus('recording_failed').catch(() => {});
+      await updateStatus('recording_failed').catch(() => { });
     } finally {
       if (progressInterval) {
         clearInterval(progressInterval);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attemptId, phase, stopRecording, router]);
+  }, [attemptId, phase, stopRecording, router, duration]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -577,6 +570,7 @@ export default function AttemptPage() {
       'System note: 30 seconds remain. Please wrap up the interview with concise final prompts.',
       { skipStudentChat: true, timerWrapUp: true }
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, isRecording, sending, shouldEnd, wrapUpRequested, remaining]);
 
   useEffect(() => {
@@ -600,273 +594,360 @@ export default function AttemptPage() {
   // ======== CONSENT GATE ========
   if (phase === 'consent') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="bg-white p-8 rounded-lg shadow-md max-w-lg w-full space-y-6">
-          <h1 className="text-2xl font-bold text-gray-900 text-center">
-            {(assignmentData as Record<string, unknown>)?.title as string || 'Assessment'}
-          </h1>
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 overflow-hidden relative">
+        <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-sky-900/30 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute w-full h-full bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
 
-          {/* Camera Preview */}
-          <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            {!hasPermissions && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-80">
-                <p className="text-white text-sm">Camera preview will appear here</p>
-              </div>
-            )}
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-800/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl border border-slate-700 max-w-2xl w-full z-10 w-11/12">
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold text-white mb-2">
+              {(assignmentData as Record<string, unknown>)?.title as string || 'Assessment Final Setup'}
+            </h1>
+            <p className="text-slate-400 text-sm font-medium">Please review and grant necessary permissions.</p>
           </div>
 
-          {/* Permission Button */}
-          {!hasPermissions ? (
-            <button
-              onClick={requestPermissions}
-              className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-            >
-              Grant Camera & Microphone Access
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 text-green-600 text-sm">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Camera and microphone access granted
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="relative bg-black rounded-2xl overflow-hidden aspect-video border border-slate-700 shadow-inner">
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              {!hasPermissions && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 text-slate-400 gap-3">
+                  <Video className="w-8 h-8 opacity-50" />
+                  <p className="text-xs font-semibold px-4 text-center">Camera preview will appear here</p>
+                </div>
+              )}
             </div>
-          )}
 
-          {/* Consent Checkbox */}
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              className="mt-1 w-4 h-4 text-blue-600 rounded"
-            />
-            <span className="text-sm text-gray-700">
-              I consent to being recorded during this assessment. I understand that the recording
-              will be reviewed by my instructor. I will speak my thought process out loud while
-              typing my answers.
-            </span>
+            <div className="flex flex-col justify-center space-y-4">
+              {!hasPermissions ? (
+                <div className="bg-sky-900/30 border border-sky-500/30 p-4 rounded-xl text-center">
+                  <div className="flex justify-center gap-2 mb-3 text-sky-400">
+                    <Video className="w-5 h-5" />
+                    <Mic className="w-5 h-5" />
+                  </div>
+                  <p className="text-sm text-sky-100 mb-4 font-medium">We need access to your camera and microphone for this oral assessment.</p>
+                  <button
+                    onClick={requestPermissions}
+                    className="w-full py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition font-semibold text-sm shadow-lg shadow-sky-600/20"
+                  >
+                    Grant Access
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-emerald-900/30 border border-emerald-500/30 p-4 rounded-xl text-center text-emerald-400 flex flex-col items-center justify-center h-full gap-2">
+                  <CheckCircle2 className="w-8 h-8" />
+                  <p className="text-sm font-medium text-emerald-100">Permissions granted</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <label className="flex items-start gap-4 p-4 bg-slate-900/50 rounded-xl border border-slate-700/50 cursor-pointer mb-6 group hover:bg-slate-900/80 transition-colors">
+            <div className="mt-1 flex-shrink-0">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                className="w-5 h-5 accent-sky-500 rounded cursor-pointer"
+              />
+            </div>
+            <div className="text-sm text-slate-300 leading-relaxed">
+              I consent to having my screen, camera, and microphone recorded during this assessment. I understand that the recording will be sent to my instructor for grading purposes. <strong className="text-white font-semibold">I will speak my thought process clearly.</strong>
+            </div>
           </label>
 
-          {error && <p className="text-red-600 text-sm">{error}</p>}
+          {error && <p className="text-red-400 text-sm mb-4 text-center font-medium bg-red-900/20 py-2 rounded-lg">{error}</p>}
 
-          {/* Start Button */}
           <button
             onClick={handleStartRecording}
             disabled={!hasPermissions || !consent}
-            className="w-full py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+            className="w-full py-3.5 bg-sky-600 text-white rounded-xl hover:bg-sky-500 disabled:opacity-50 disabled:bg-slate-700 transition font-bold text-lg shadow-lg shadow-sky-600/20 disabled:shadow-none flex items-center justify-center gap-2"
           >
-            Start Assessment
+            Enter Assessment Mode
           </button>
-        </div>
+        </motion.div>
       </div>
     );
   }
 
-  // ======== UPLOADING ========
-  if (phase === 'uploading') {
+  // ======== UPLOADING / FINALIZING ========
+  if (phase === 'uploading' || phase === 'finalizing') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full space-y-6 text-center">
-          <h2 className="text-xl font-bold text-gray-900">Uploading Recording...</h2>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className="bg-blue-600 h-3 rounded-full transition-all duration-300"
-              style={{ width: `${uploadProgress}%` }}
-            />
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-800 p-10 rounded-3xl shadow-2xl border border-slate-700 max-w-sm w-full text-center">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-700 mb-6 drop-shadow-xl border border-slate-600">
+            {phase === 'uploading' ? (
+              <Loader2 className="w-8 h-8 text-sky-400 animate-spin" />
+            ) : (
+              <Sparkles className="w-8 h-8 text-purple-400 animate-pulse" />
+            )}
           </div>
-          <p className="text-sm text-gray-500">{uploadProgress}% complete</p>
-          <p className="text-xs text-gray-400">
-            Please do not close this page. Your submission is only valid after upload completes.
+
+          <h2 className="text-xl font-bold text-white mb-2">
+            {phase === 'uploading' ? 'Uploading Recording...' : 'AI is Grading...'}
+          </h2>
+
+          {phase === 'uploading' && (
+            <div className="w-full bg-slate-700 rounded-full h-2.5 mt-6 mb-3 overflow-hidden">
+              <div
+                className="bg-sky-500 h-2.5 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          )}
+
+          <p className="text-sm text-slate-400 mb-2">
+            {phase === 'uploading' ? `${uploadProgress}% complete` : 'Analyzing your transcript and rubric...'}
           </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ======== FINALIZING ========
-  if (phase === 'finalizing') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full space-y-4 text-center">
-          <h2 className="text-xl font-bold text-gray-900">Grading Your Submission...</h2>
-          <div className="animate-pulse flex justify-center">
-            <div className="w-12 h-12 bg-blue-200 rounded-full" />
-          </div>
-          <p className="text-sm text-gray-500">AI is reviewing your responses. This may take a moment.</p>
-        </div>
+          <p className="text-xs text-amber-400/80 font-medium">
+            Please do not close this window.
+          </p>
+        </motion.div>
       </div>
     );
   }
 
   // ======== INTERVIEW ========
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Top Bar */}
-      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+    <div className="h-screen flex flex-col bg-slate-50 font-sans overflow-hidden">
+      {/* Top Header */}
+      <header className="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between shadow-md z-20 shrink-0">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+            <span className="text-white font-bold tracking-tight">Oral Assessment</span>
+            <span className="text-slate-400 text-xs font-medium">{(assignmentData as Record<string, unknown>)?.title as string}</span>
+          </div>
+
+          <div className="h-6 w-px bg-slate-700 mx-2" />
+
           {/* Recording Indicator */}
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-            <span className="text-sm font-medium text-red-600">REC</span>
-          </div>
-          {/* Timer */}
-          <span className={`text-sm font-mono ${remaining < 60 ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
-            {formatTime(remaining)} remaining
-          </span>
-          {!isFullscreen && (
-            <span className="text-xs text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded">
-              Fullscreen required
-            </span>
-          )}
-          {isMultiMonitorDetected && (
-            <span className="text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded">
-              Multi-monitor detected (flagged)
-            </span>
-          )}
-        </div>
-        <button
-          onClick={handleSubmit}
-          disabled={sending || (!hasStudentResponse && !shouldEnd)}
-          className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 disabled:opacity-50 transition"
-        >
-          Submit Assessment
-        </button>
-      </div>
-
-      <div className="flex-1 flex overflow-hidden">
-        {/* Camera Preview (sidebar) */}
-        <div className="w-48 bg-black flex-shrink-0 relative">
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute bottom-2 left-2 right-2">
-            <div className="bg-black bg-opacity-60 rounded px-2 py-1 text-xs text-white text-center">
-              {formatTime(duration)}
-            </div>
-          </div>
-        </div>
-
-        {/* Main Interview Panel */}
-        <div className="flex-1 flex flex-col">
-          {/* Chat Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chat.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${msg.role === 'student' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] p-3 rounded-lg text-sm ${
-                    msg.role === 'ai'
-                      ? 'bg-blue-50 text-blue-900 border border-blue-100'
-                      : 'bg-gray-100 text-gray-900 border border-gray-200'
-                  }`}
-                >
-                  <p className="text-xs font-medium mb-1 opacity-60">
-                    {msg.role === 'ai' ? '🤖 CodeCoach' : '👤 You'}
-                  </p>
-                  {msg.role === 'ai' ? (
-                    <MarkdownMessage content={msg.content} />
-                  ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-            {sending && (
-              <div className="flex justify-start">
-                <div className="bg-blue-50 p-3 rounded-lg text-sm border border-blue-100">
-                  <p className="text-blue-600 animate-pulse">CodeCoach is thinking...</p>
-                </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
+          <div className="flex items-center gap-2 bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20">
+            <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+            <span className="text-xs font-bold text-red-500 tracking-wider">REC</span>
+            <span className="text-xs font-mono text-red-400 ml-1">{formatTime(duration)}</span>
           </div>
 
-          {/* Input Area */}
-          <div className="border-t border-gray-200 bg-white p-4">
-            {shouldEnd && (
-              <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-700">
-                {endCountdown !== null
-                  ? `The interviewer is wrapping up. Auto-submit in ${endCountdown}s.`
-                  : 'The interviewer is wrapping up. Please click Submit Assessment before time runs out.'}
-              </div>
-            )}
+          <div className="flex gap-2">
             {!isFullscreen && (
-              <div className="mb-3 p-2 bg-orange-50 border border-orange-200 rounded text-sm text-orange-700 flex items-center justify-between gap-3">
-                <span>You exited fullscreen. Re-enter fullscreen to continue safely.</span>
-                <button
-                  onClick={requestFullscreenMode}
-                  className="px-3 py-1.5 bg-orange-600 text-white rounded text-xs hover:bg-orange-700 transition"
-                >
-                  Re-enter Fullscreen
-                </button>
-              </div>
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-md">
+                <Maximize className="w-3.5 h-3.5" /> Fullscreen Required
+              </span>
             )}
             {isMultiMonitorDetected && (
-              <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                Multiple monitors were detected. This session has been flagged for instructor review.
-              </div>
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded-md">
+                <ShieldAlert className="w-3.5 h-3.5" /> Multi-Monitor
+              </span>
             )}
-            {error && (
-              <p className="text-red-600 text-sm mb-2">{error}</p>
-            )}
-            {!speechSupported && (
-              <p className="text-sm text-red-600 mb-2">
-                Voice input is not supported in this browser. Please use Chrome or Edge.
-              </p>
-            )}
-            <div className="flex gap-2 items-end">
-              <textarea
-                value={speechDraft}
-                readOnly
-                placeholder="Your speech transcript will appear here..."
-                rows={4}
-                disabled
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none bg-gray-50 text-gray-700 overflow-y-auto"
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {/* Timer */}
+          <div className={`flex items-center gap-2 px-4 py-1.5 rounded-lg border ${remaining < 60 ? 'bg-red-500/10 border-red-500/30' : 'bg-slate-800 border-slate-700'
+            }`}>
+            <Clock className={`w-4 h-4 ${remaining < 60 ? 'text-red-400 animate-pulse' : 'text-slate-400'}`} />
+            <span className={`text-sm font-mono font-bold tracking-wider ${remaining < 60 ? 'text-red-400' : 'text-white'}`}>
+              {formatTime(remaining)}
+            </span>
+          </div>
+
+          <button
+            onClick={handleSubmit}
+            disabled={sending || (!hasStudentResponse && !shouldEnd)}
+            className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-500 disabled:opacity-50 disabled:hover:bg-red-600 transition-colors shadow-lg shadow-red-600/20 flex items-center gap-2"
+          >
+            Submit Assessment
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace Layout */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* Left Sidebar: Video & Instructions */}
+        <div className="w-64 lg:w-80 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0">
+
+          <div className="p-4 flex-1">
+            <div className="relative bg-black rounded-xl overflow-hidden aspect-[4/3] border border-slate-700 shadow-inner mb-4">
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover transform scale-x-[-1]"
               />
-              {!isListening ? (
-                <button
-                  onClick={startListening}
-                  disabled={!isRecording || sending || !speechSupported || !isFullscreen || shouldEnd}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 transition"
-                >
-                  Speak
-                </button>
-              ) : (
-                <button
-                  onClick={stopListening}
-                  className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800 transition"
-                >
-                  Stop
-                </button>
-              )}
-              <button
-                onClick={handleSendMessage}
-                disabled={!isRecording || sending || isListening || !speechDraft.trim() || !isFullscreen || shouldEnd}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition self-end"
-              >
-                Send
-              </button>
+              <div className="absolute top-2 left-2 flex gap-1">
+                <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5 border border-white/10">
+                  <Video className="w-3 h-3 text-sky-400" /> You
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-gray-400 mt-2">
-              Voice-only mode: click Speak, answer out loud, then click Stop and Send.
-            </p>
+
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+              <h3 className="font-semibold text-white text-sm flex items-center gap-2 mb-2">
+                <ShieldAlert className="w-4 h-4 text-sky-400" /> Proctored Session
+              </h3>
+              <ul className="text-xs text-slate-400 space-y-2 leading-relaxed">
+                <li>• Speak constantly to explain your thoughts.</li>
+                <li>• Do not switch tabs.</li>
+                <li>• Stay in fullscreen mode.</li>
+                <li>• CodeCoach AI is directing the interview.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Main Area: Chat & Input */}
+        <div className="flex-1 flex flex-col min-w-0 bg-white relative">
+
+          {/* Chat Transcript */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 space-y-6">
+            <AnimatePresence>
+              {chat.map((msg, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`flex ${msg.role === 'student' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`flex gap-3 max-w-[85%] lg:max-w-[75%] ${msg.role === 'student' ? 'flex-row-reverse' : 'flex-row'}`}>
+
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${msg.role === 'ai' ? 'bg-sky-100 text-sky-600 border-sky-200' : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}>
+                      {msg.role === 'ai' ? <Sparkles className="w-4 h-4" /> : <UserCircle className="w-5 h-5 text-slate-400" />}
+                    </div>
+
+                    <div className={`p-4 rounded-2xl shadow-sm border ${msg.role === 'ai'
+                        ? 'bg-white border-slate-200 rounded-tl-none'
+                        : 'bg-sky-600 text-white border-sky-500 rounded-tr-none'
+                      }`}
+                    >
+                      <div className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${msg.role === 'ai' ? 'text-sky-600' : 'text-sky-200'}`}>
+                        {msg.role === 'ai' ? 'CodeCoach AI' : 'You'}
+                      </div>
+
+                      <div className={`prose prose-sm max-w-none ${msg.role === 'student' ? 'prose-invert text-white' : 'text-slate-800'}`}>
+                        {msg.role === 'ai' ? (
+                          <MarkdownMessage content={msg.content} />
+                        ) : (
+                          <p className="whitespace-pre-wrap leading-relaxed m-0">{msg.content}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+              {sending && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
+                  <div className="flex gap-3">
+                    <div className="w-8 h-8 rounded-full bg-sky-100 border border-sky-200 flex items-center justify-center shrink-0">
+                      <Sparkles className="w-4 h-4 text-sky-600" />
+                    </div>
+                    <div className="bg-white border border-slate-200 p-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
+                      <div className="w-2 h-2 bg-sky-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-2 h-2 bg-sky-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-2 h-2 bg-sky-400 rounded-full animate-bounce"></div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <div ref={chatEndRef} className="h-4" />
+          </div>
+
+          {/* Bottom Input Area */}
+          <div className="bg-slate-50 border-t border-slate-200 p-4 sm:p-6 shrink-0 z-10 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+
+            <div className="max-w-4xl mx-auto space-y-3">
+
+              <AnimatePresence>
+                {shouldEnd && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium flex items-center gap-2 shadow-sm">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                    {endCountdown !== null
+                      ? `The interviewer is wrapping up. Auto-submit in ${endCountdown}s.`
+                      : 'The interviewer is wrapping up. Please click Submit Assessment before time runs out.'}
+                  </motion.div>
+                )}
+                {!isFullscreen && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-sm font-medium text-orange-800 flex items-center justify-between gap-3 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <Maximize className="w-4 h-4 shrink-0 text-orange-500" />
+                      <span>You exited fullscreen. Re-enter fullscreen to continue securely.</span>
+                    </div>
+                    <button
+                      onClick={requestFullscreenMode}
+                      className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs hover:bg-orange-700 transition font-bold whitespace-nowrap shadow-sm shadow-orange-600/20"
+                    >
+                      Enter Fullscreen
+                    </button>
+                  </motion.div>
+                )}
+                {error && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-medium text-red-700 flex items-center gap-2 shadow-sm">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
+                    {error}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="flex gap-3">
+                <div className="flex-1 relative">
+                  <textarea
+                    value={speechDraft}
+                    readOnly
+                    placeholder={isListening ? "Listening to your voice..." : "Click 'Start Speaking' to dictate your answer..."}
+                    rows={3}
+                    disabled
+                    className={`w-full px-4 py-3 rounded-xl text-sm resize-none transition-all outline-none border ${isListening
+                        ? 'bg-sky-50 border-sky-300 ring-2 ring-sky-500/20 text-slate-800'
+                        : 'bg-white border-slate-300 text-slate-600 shadow-inner'
+                      }`}
+                  />
+                  {isListening && (
+                    <div className="absolute right-3 bottom-4 flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
+                      <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Listening</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 shrink-0 w-[140px]">
+                  {!isListening ? (
+                    <button
+                      onClick={startListening}
+                      disabled={!isRecording || sending || !speechSupported || !isFullscreen || shouldEnd}
+                      className="flex-1 flex justify-center items-center gap-2 px-4 bg-slate-800 text-white rounded-xl hover:bg-slate-700 disabled:opacity-50 disabled:hover:bg-slate-800 transition-all font-semibold shadow-sm text-sm"
+                    >
+                      <Mic className="w-4 h-4" />
+                      Speak
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopListening}
+                      className="flex-1 flex justify-center items-center gap-2 px-4 bg-amber-100 text-amber-800 border border-amber-300 rounded-xl hover:bg-amber-200 transition-all font-semibold shadow-sm text-sm"
+                    >
+                      <StopCircle className="w-4 h-4" />
+                      Stop
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!isRecording || sending || isListening || !speechDraft.trim() || !isFullscreen || shouldEnd}
+                    className="flex-1 flex justify-center items-center gap-2 px-4 bg-sky-600 text-white rounded-xl hover:bg-sky-500 disabled:opacity-50 disabled:hover:bg-sky-600 transition-all font-semibold shadow-sm shadow-sky-600/20 text-sm"
+                  >
+                    <Send className="w-4 h-4" />
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
