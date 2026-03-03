@@ -5,6 +5,17 @@ import { supabase } from '@/lib/supabase/client';
 import { useRouter, useParams } from 'next/navigation';
 import type { Assignment, SelectedProblem, QuestionBank } from '@/lib/types';
 
+function normalizeQuestions(questionBank: QuestionBank | null): SelectedProblem[] {
+  if (!questionBank) return [];
+  if (Array.isArray(questionBank.questions) && questionBank.questions.length > 0) {
+    return questionBank.questions;
+  }
+  if (questionBank.selected_problem) {
+    return [questionBank.selected_problem];
+  }
+  return [];
+}
+
 export default function AssignmentDetail() {
   const params = useParams();
   const router = useRouter();
@@ -16,6 +27,9 @@ export default function AssignmentDetail() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const [questions, setQuestions] = useState<SelectedProblem[]>([]);
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState<number | null>(null);
 
   const [problemTitle, setProblemTitle] = useState('');
   const [problemDesc, setProblemDesc] = useState('');
@@ -42,14 +56,19 @@ export default function AssignmentDetail() {
     if (data) {
       const a = data as Assignment;
       setAssignment(a);
-      const qb = a.question_bank as QuestionBank | null;
 
-      if (qb?.selected_problem) {
-        setProblemTitle(qb.selected_problem.title);
-        setProblemDesc(qb.selected_problem.description);
-        setFollowups(qb.selected_problem.followups || []);
-        setConceptTargets(qb.selected_problem.concept_targets || []);
+      const normalized = normalizeQuestions(a.question_bank as QuestionBank | null);
+      setQuestions(normalized);
+
+      if (normalized.length > 0) {
+        const first = normalized[0];
+        setActiveQuestionIndex(0);
+        setProblemTitle(first.title || '');
+        setProblemDesc(first.description || '');
+        setFollowups(first.followups || []);
+        setConceptTargets(first.concept_targets || []);
       } else {
+        setActiveQuestionIndex(null);
         setProblemTitle('');
         setProblemDesc('');
         setFollowups([]);
@@ -66,6 +85,31 @@ export default function AssignmentDetail() {
     loadAssignment();
   }, [loadAssignment]);
 
+  function openQuestionForEdit(index: number) {
+    const question = questions[index];
+    if (!question) return;
+
+    setActiveQuestionIndex(index);
+    setProblemTitle(question.title || '');
+    setProblemDesc(question.description || '');
+    setFollowups(question.followups || []);
+    setConceptTargets(question.concept_targets || []);
+    setHasUnsavedQuestionDraft(false);
+    setError('');
+    setSuccess('');
+  }
+
+  function handleCreateManualQuestion() {
+    setActiveQuestionIndex(null);
+    setProblemTitle('');
+    setProblemDesc('');
+    setFollowups(['']);
+    setConceptTargets(['']);
+    setHasUnsavedQuestionDraft(true);
+    setError('');
+    setSuccess('Create your own question, then click Save Question.');
+  }
+
   async function handleGenerate() {
     if (!assignment) return;
 
@@ -80,6 +124,7 @@ export default function AssignmentDetail() {
         body: JSON.stringify({
           topic: assignment.topic,
           difficulty: assignment.difficulty,
+          existingQuestionTitles: questions.map((q) => q.title),
         }),
       });
 
@@ -87,12 +132,13 @@ export default function AssignmentDetail() {
       if (!res.ok) throw new Error(data.error);
 
       const sp: SelectedProblem = data.selected_problem;
+      setActiveQuestionIndex(null);
       setProblemTitle(sp.title || '');
       setProblemDesc(sp.description || '');
       setFollowups(sp.followups || []);
       setConceptTargets(sp.concept_targets || []);
       setHasUnsavedQuestionDraft(true);
-      setSuccess('Question generated. Review or modify it, then click Save Problem to approve.');
+      setSuccess('AI generated a new draft question. Review/modify and click Save Question.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate');
     }
@@ -100,18 +146,29 @@ export default function AssignmentDetail() {
     setGenerating(false);
   }
 
-  function handleCreateManualQuestion() {
-    setError('');
-    setSuccess('Create your own question, then click Save Problem to approve.');
-    setProblemTitle('');
-    setProblemDesc('');
-    setFollowups(['']);
-    setConceptTargets(['']);
-    setHasUnsavedQuestionDraft(true);
+  function buildDraftQuestion(): SelectedProblem | null {
+    const trimmedTitle = problemTitle.trim();
+    const trimmedDesc = problemDesc.trim();
+
+    if (!trimmedTitle || !trimmedDesc) return null;
+
+    const existingId =
+      activeQuestionIndex !== null && questions[activeQuestionIndex]
+        ? questions[activeQuestionIndex].id
+        : crypto.randomUUID();
+
+    return {
+      id: existingId,
+      title: trimmedTitle,
+      description: trimmedDesc,
+      followups: followups.map((f) => f.trim()).filter(Boolean),
+      concept_targets: conceptTargets.map((c) => c.trim()).filter(Boolean),
+    };
   }
 
   async function handleSaveProblem() {
-    if (!problemTitle.trim() || !problemDesc.trim()) {
+    const draft = buildDraftQuestion();
+    if (!draft) {
       setError('Problem title and description are required');
       return;
     }
@@ -119,46 +176,94 @@ export default function AssignmentDetail() {
     setSaving(true);
     setError('');
 
-    const qb = assignment?.question_bank as QuestionBank | null;
-    const sp: SelectedProblem = {
-      id: qb?.selected_problem?.id || crypto.randomUUID(),
-      title: problemTitle.trim(),
-      description: problemDesc.trim(),
-      followups: followups.map((f) => f.trim()).filter(Boolean),
-      concept_targets: conceptTargets.map((c) => c.trim()).filter(Boolean),
-    };
+    const updatedQuestions = [...questions];
+    let savedIndex = activeQuestionIndex;
+
+    if (activeQuestionIndex !== null && updatedQuestions[activeQuestionIndex]) {
+      updatedQuestions[activeQuestionIndex] = draft;
+    } else {
+      updatedQuestions.push(draft);
+      savedIndex = updatedQuestions.length - 1;
+    }
 
     const { error: uErr } = await supabase
       .from('assignments')
-      .update({ question_bank: { selected_problem: sp } })
+      .update({ question_bank: { questions: updatedQuestions } })
       .eq('id', assignmentId);
 
     if (uErr) {
       setError(uErr.message);
-    } else {
-      setSuccess('Problem saved and approved!');
-      setHasUnsavedQuestionDraft(false);
-      loadAssignment();
+      setSaving(false);
+      return;
     }
 
+    setQuestions(updatedQuestions);
+    setActiveQuestionIndex(null);
+    setProblemTitle('');
+    setProblemDesc('');
+    setFollowups(['']);
+    setConceptTargets(['']);
+    setHasUnsavedQuestionDraft(true);
+    setSuccess('Question saved to bank! You can add another question now.');
     setSaving(false);
+
+    if (savedIndex !== null && savedIndex >= 0) {
+      // Keep UI list current without overriding the fresh draft state.
+      setQuestions(updatedQuestions);
+    }
+  }
+
+  async function handleDeleteQuestion(index: number) {
+    const updatedQuestions = questions.filter((_, i) => i !== index);
+
+    setSaving(true);
+    setError('');
+
+    const { error: uErr } = await supabase
+      .from('assignments')
+      .update({ question_bank: { questions: updatedQuestions } })
+      .eq('id', assignmentId);
+
+    if (uErr) {
+      setError(uErr.message);
+      setSaving(false);
+      return;
+    }
+
+    setQuestions(updatedQuestions);
+
+    if (updatedQuestions.length === 0) {
+      setActiveQuestionIndex(null);
+      setProblemTitle('');
+      setProblemDesc('');
+      setFollowups([]);
+      setConceptTargets([]);
+      setHasUnsavedQuestionDraft(false);
+    } else {
+      const nextIndex = Math.min(index, updatedQuestions.length - 1);
+      openQuestionForEdit(nextIndex);
+    }
+
+    setSuccess('Question removed from bank.');
+    setSaving(false);
+    loadAssignment();
   }
 
   async function handlePublish() {
-    if (!assignment?.question_bank) {
-      setError('Create or generate + save a question before publishing');
+    if (questions.length === 0) {
+      setError('Add at least one question to the question bank before publishing');
       return;
     }
 
     const { error: uErr } = await supabase
       .from('assignments')
-      .update({ published: !assignment.published })
+      .update({ published: !assignment?.published })
       .eq('id', assignmentId);
 
     if (uErr) {
       setError(uErr.message);
     } else {
-      setSuccess(assignment.published ? 'Unpublished!' : 'Published!');
+      setSuccess(assignment?.published ? 'Unpublished!' : 'Published!');
       loadAssignment();
     }
   }
@@ -182,7 +287,7 @@ export default function AssignmentDetail() {
   const studentLink = `${typeof window !== 'undefined' ? window.location.origin : ''}/a/${assignmentId}`;
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
+    <div className="max-w-4xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{assignment.title}</h1>
@@ -236,7 +341,7 @@ export default function AssignmentDetail() {
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Question Bank</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Question Bank ({questions.length})</h2>
           <div className="flex gap-2">
             <button
               onClick={handleCreateManualQuestion}
@@ -249,14 +354,38 @@ export default function AssignmentDetail() {
               disabled={generating}
               className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 transition"
             >
-              {generating ? 'Generating...' : 'Generate Question Bank'}
+              {generating ? 'Generating...' : 'Generate Question'}
             </button>
           </div>
         </div>
 
-        {!problemTitle && !problemDesc && followups.length === 0 && conceptTargets.length === 0 && (
+        {questions.length > 0 && (
+          <div className="mb-5 border border-gray-200 rounded-md p-3 bg-gray-50">
+            <p className="text-xs font-medium text-gray-600 mb-2">Saved Questions</p>
+            <div className="space-y-2">
+              {questions.map((q, i) => (
+                <div key={q.id} className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded p-2">
+                  <button
+                    onClick={() => openQuestionForEdit(i)}
+                    className={`text-left flex-1 text-sm ${activeQuestionIndex === i ? 'text-blue-700 font-medium' : 'text-gray-700'}`}
+                  >
+                    {i + 1}. {q.title}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteQuestion(i)}
+                    className="text-xs text-red-600 hover:text-red-700"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {questions.length === 0 && !hasUnsavedQuestionDraft && (
           <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm text-gray-600 mb-4">
-            Choose <strong>Create Manually</strong> to write your own question, or <strong>Generate Question Bank</strong> and then approve it by clicking <strong>Save Problem</strong>.
+            Add multiple questions manually or generate with AI. Students will receive a random question from this bank.
           </div>
         )}
 
@@ -362,7 +491,7 @@ export default function AssignmentDetail() {
           </div>
 
           {hasUnsavedQuestionDraft && (
-            <p className="text-xs text-amber-600">You have unsaved question changes.</p>
+            <p className="text-xs text-amber-600">You have unsaved question draft changes.</p>
           )}
 
           <button
@@ -370,7 +499,7 @@ export default function AssignmentDetail() {
             disabled={saving}
             className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 transition"
           >
-            {saving ? 'Saving...' : 'Save Problem'}
+            {saving ? 'Saving...' : 'Save Question'}
           </button>
         </div>
       </div>

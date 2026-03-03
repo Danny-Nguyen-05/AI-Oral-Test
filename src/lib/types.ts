@@ -22,7 +22,8 @@ export interface RubricWeight {
 }
 
 export interface QuestionBank {
-  selected_problem: SelectedProblem;
+  questions?: SelectedProblem[];
+  selected_problem?: SelectedProblem;
 }
 
 export interface SelectedProblem {

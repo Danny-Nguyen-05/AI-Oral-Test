@@ -18,11 +18,13 @@ Rules:
 - Do NOT include solutions or code
 - Make the problem appropriate for the given difficulty
 - Include 3-5 followup questions that probe deeper understanding
-- Include 3-5 concept targets the problem tests`;
+- Include 3-5 concept targets the problem tests
+- Ensure strong variation in scenario, data shape, constraints, and core algorithmic angle
+- If existing question titles are provided, avoid semantic duplicates and near-identical variants`;
 
 export async function POST(req: NextRequest) {
   try {
-    const { topic, difficulty } = await req.json();
+    const { topic, difficulty, existingQuestionTitles = [] } = await req.json();
 
     if (!topic) {
       return NextResponse.json({ error: 'topic required' }, { status: 400 });
@@ -31,9 +33,11 @@ export async function POST(req: NextRequest) {
     const userMessage = JSON.stringify({
       topic,
       difficulty: difficulty || 'medium',
+      existing_question_titles: Array.isArray(existingQuestionTitles) ? existingQuestionTitles : [],
+      variation_nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
 
-    const rawResponse = await callAI(GENERATE_PROMPT, userMessage);
+    const rawResponse = await callAI(GENERATE_PROMPT, userMessage, { temperature: 0.9 });
     const parsed = JSON.parse(rawResponse);
 
     if (!parsed.selected_problem || !parsed.selected_problem.id) {

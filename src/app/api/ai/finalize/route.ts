@@ -69,7 +69,16 @@ export async function POST(req: NextRequest) {
       integritySummary[e.event_type] = (integritySummary[e.event_type] || 0) + 1;
     });
 
-    const questionBank = assignment.question_bank as { selected_problem?: Record<string, unknown> } | null;
+    const questionBank = assignment.question_bank as {
+      questions?: Record<string, unknown>[];
+      selected_problem?: Record<string, unknown>;
+    } | null;
+    const bankQuestions = questionBank?.questions || [];
+    const selectedProblemId = (attempt.ai_state as { selected_problem_id?: string } | null)?.selected_problem_id;
+    const selectedFromBank = bankQuestions.find(
+      (q) => String((q as { id?: string }).id || '') === String(selectedProblemId || '')
+    );
+    const selectedProblem = selectedFromBank || questionBank?.selected_problem || bankQuestions[0] || {};
 
     const userMessage = buildGraderUserMessage({
       assignment_settings: {
@@ -80,7 +89,7 @@ export async function POST(req: NextRequest) {
         max_turns: assignment.max_turns,
       },
       rubric: assignment.rubric || [],
-      selected_problem: questionBank?.selected_problem || {},
+      selected_problem: selectedProblem,
       transcript: (messages || []).map((m: { role: string; content: string }) => ({
         role: m.role,
         content: m.content,

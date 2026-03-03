@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useRouter, useParams } from 'next/navigation';
 import type { Attempt, TranscriptMessage, IntegrityEvent, RubricBreakdownItem } from '@/lib/types';
+import MarkdownMessage from '@/components/MarkdownMessage';
 
 export default function AttemptDetail() {
   const params = useParams();
@@ -277,7 +278,11 @@ export default function AttemptDetail() {
                     <p className="text-xs font-medium mb-1 uppercase">
                       {msg.role === 'ai' ? '🤖 CodeCoach' : '👤 Student'}
                     </p>
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    {msg.role === 'ai' ? (
+                      <MarkdownMessage content={msg.content} />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    )}
                     <p className="text-xs text-gray-400 mt-1">
                       {new Date(msg.created_at).toLocaleTimeString()}
                     </p>

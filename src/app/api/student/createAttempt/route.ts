@@ -24,14 +24,24 @@ export async function POST(req: NextRequest) {
     }
 
     // Build initial AI state
-    const questionBank = assignment.question_bank as { selected_problem?: { id: string; concept_targets?: string[] } } | null;
+    const questionBank = assignment.question_bank as {
+      questions?: { id: string; concept_targets?: string[] }[];
+      selected_problem?: { id: string; concept_targets?: string[] };
+    } | null;
+
+    const questions = questionBank?.questions || [];
+    const fallbackSelected = questionBank?.selected_problem;
+    const selectedProblem = questions.length > 0
+      ? questions[Math.floor(Math.random() * questions.length)]
+      : fallbackSelected;
+
     const initialState = {
       phase: 'A',
       turn_index: 0,
       max_turns: assignment.max_turns || 10,
-      selected_problem_id: questionBank?.selected_problem?.id || '',
+      selected_problem_id: selectedProblem?.id || '',
       asked_followups: [],
-      concept_targets_remaining: questionBank?.selected_problem?.concept_targets || [],
+      concept_targets_remaining: selectedProblem?.concept_targets || [],
       difficulty_adjustment: 'same',
       should_end: false,
       reason_to_end: '',

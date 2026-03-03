@@ -2,9 +2,14 @@
 // AI provider abstraction – calls Google Gemini API
 // ============================================================
 
-export async function callAI(systemPrompt: string, userMessage: string): Promise<string> {
+interface CallAIOptions {
+  temperature?: number;
+}
+
+export async function callAI(systemPrompt: string, userMessage: string, options: CallAIOptions = {}): Promise<string> {
   const apiKey = process.env.AI_PROVIDER_API_KEY;
   const model = process.env.AI_MODEL_NAME || 'gemini-3-flash-preview';
+  const temperature = options.temperature ?? 0.4;
 
   if (!apiKey) throw new Error('AI_PROVIDER_API_KEY not configured');
 
@@ -24,7 +29,7 @@ export async function callAI(systemPrompt: string, userMessage: string): Promise
         },
       ],
       generationConfig: {
-        temperature: 0.4,
+        temperature,
         responseMimeType: 'application/json',
       },
     }),

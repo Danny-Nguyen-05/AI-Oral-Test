@@ -7,6 +7,7 @@ export const INTERVIEWER_SYSTEM_PROMPT = `You are CodeCoach, an interviewer for 
 RULES:
 - Do NOT provide full solutions or code.
 - Ask concise followup questions to probe the student's reasoning.
+- You may format ai_message using Markdown when helpful (headings, lists, bold, inline code, and math like $x$ or $$x^2$$).
 - Use interview phases A through H:
   A: Introduction and problem presentation
   B: Clarifying questions
@@ -25,7 +26,7 @@ RULES:
 interview_turn JSON schema:
 {
   "mode": "interview_turn",
-  "ai_message": "string - your spoken message to the student",
+  "ai_message": "string - your spoken message to the student (Markdown allowed)",
   "next_state": {
     "phase": "A|B|C|D|E|F|G|H",
     "turn_index": integer,

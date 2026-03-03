@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
     const isTimerWrapUp = Boolean(timerWrapUp);
     const effectiveStudentMessage = isTimerWrapUp
-      ? 'System note: About 30 seconds remain. Please wrap up the interview now.'
+      ? 'System note: About 30 seconds remain. Please wrap up now and instruct the student to submit manually before time ends.'
       : String(studentMessage);
 
     const supabase = getServiceSupabase();
@@ -81,7 +81,16 @@ export async function POST(req: NextRequest) {
       ...(isTimerWrapUp ? [{ role: 'system', content: effectiveStudentMessage }] : [{ role: 'student', content: effectiveStudentMessage }]),
     ];
 
-    const questionBank = assignment.question_bank as { selected_problem?: Record<string, unknown> } | null;
+    const questionBank = assignment.question_bank as {
+      questions?: Record<string, unknown>[];
+      selected_problem?: Record<string, unknown>;
+    } | null;
+    const bankQuestions = questionBank?.questions || [];
+    const selectedProblemId = (attempt.ai_state as { selected_problem_id?: string } | null)?.selected_problem_id;
+    const selectedFromBank = bankQuestions.find(
+      (q) => String((q as { id?: string }).id || '') === String(selectedProblemId || '')
+    );
+    const selectedProblem = selectedFromBank || questionBank?.selected_problem || bankQuestions[0] || {};
 
     // Call AI
     const userMessage = buildInterviewerUserMessage({
@@ -93,7 +102,7 @@ export async function POST(req: NextRequest) {
         max_turns: assignment.max_turns,
       },
       rubric: assignment.rubric || [],
-      selected_problem: questionBank?.selected_problem || {},
+      selected_problem: selectedProblem,
       state: attempt.ai_state,
       transcript,
       student_message: effectiveStudentMessage,

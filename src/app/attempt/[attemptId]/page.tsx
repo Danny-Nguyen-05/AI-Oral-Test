@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useRecording } from '@/hooks/useRecording';
 import { useIntegrity } from '@/hooks/useIntegrity';
+import MarkdownMessage from '@/components/MarkdownMessage';
 
 type Phase = 'consent' | 'interview' | 'uploading' | 'finalizing' | 'done';
 
@@ -363,18 +364,28 @@ export default function AttemptPage() {
       setChat((prev) => [...prev, { role: 'ai', content: data.ai_message }]);
 
       if (data.should_end) {
+        const shouldAutoSubmit = remaining > 30;
+
         if (!hasAnnouncedEndRef.current) {
           hasAnnouncedEndRef.current = true;
           setChat((prev) => [
             ...prev,
             {
               role: 'ai',
-              content: 'I am wrapping up this assessment now. Your submission will be auto-submitted in 5 seconds.',
+              content: shouldAutoSubmit
+                ? 'I am wrapping up this assessment now. Your submission will be auto-submitted in 10 seconds.'
+                : 'I am wrapping up this assessment now. Please click **Submit Assessment** before time runs out.',
             },
           ]);
         }
+
         setShouldEnd(true);
-        setEndCountdown(5);
+        if (shouldAutoSubmit) {
+          hasStartedAutoSubmitRef.current = false;
+          setEndCountdown(10);
+        } else {
+          setEndCountdown(null);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to communicate with AI');
@@ -720,7 +731,7 @@ export default function AttemptPage() {
         </div>
         <button
           onClick={handleSubmit}
-          disabled={!hasStudentResponse || sending}
+          disabled={sending || (!hasStudentResponse && !shouldEnd)}
           className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 disabled:opacity-50 transition"
         >
           Submit Assessment
@@ -763,7 +774,11 @@ export default function AttemptPage() {
                   <p className="text-xs font-medium mb-1 opacity-60">
                     {msg.role === 'ai' ? '🤖 CodeCoach' : '👤 You'}
                   </p>
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === 'ai' ? (
+                    <MarkdownMessage content={msg.content} />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
                 </div>
               </div>
             ))}
@@ -781,7 +796,9 @@ export default function AttemptPage() {
           <div className="border-t border-gray-200 bg-white p-4">
             {shouldEnd && (
               <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-700">
-                The interviewer is wrapping up. Auto-submit in {endCountdown ?? 0}s.
+                {endCountdown !== null
+                  ? `The interviewer is wrapping up. Auto-submit in ${endCountdown}s.`
+                  : 'The interviewer is wrapping up. Please click Submit Assessment before time runs out.'}
               </div>
             )}
             {!isFullscreen && (
