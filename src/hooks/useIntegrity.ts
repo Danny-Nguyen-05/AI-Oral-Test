@@ -58,16 +58,51 @@ export function useIntegrity({ attemptId, enabled }: UseIntegrityOptions) {
       logEvent(attemptId, 'page_unload');
     };
 
+    const handleClipboard = (event: ClipboardEvent) => {
+      logEvent(attemptId, `clipboard_${event.type}`);
+    };
+
+    const handleContextMenu = () => {
+      logEvent(attemptId, 'context_menu_opened');
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const ctrlOrMeta = event.ctrlKey || event.metaKey;
+
+      if (ctrlOrMeta && event.shiftKey && (key === 'i' || key === 'j' || key === 'c')) {
+        logEvent(attemptId, 'suspicious_shortcut', { combo: `${ctrlOrMeta ? 'ctrl/meta+' : ''}shift+${key}` });
+      }
+
+      if (ctrlOrMeta && (key === 'u' || key === 'p' || key === 's')) {
+        logEvent(attemptId, 'suspicious_shortcut', { combo: `${ctrlOrMeta ? 'ctrl/meta+' : ''}${key}` });
+      }
+
+      if (event.altKey && key === 'tab') {
+        logEvent(attemptId, 'alt_tab_attempt');
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('copy', handleClipboard);
+    document.addEventListener('cut', handleClipboard);
+    document.addEventListener('paste', handleClipboard);
+    document.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('copy', handleClipboard);
+      document.removeEventListener('cut', handleClipboard);
+      document.removeEventListener('paste', handleClipboard);
+      document.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [attemptId, enabled]);
 

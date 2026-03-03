@@ -29,12 +29,22 @@ export function useRecording(opts: UseRecordingOptions = {}): UseRecordingReturn
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
+  const mimeTypeRef = useRef<string>('video/webm');
 
   const requestPermissions = useCallback(async (): Promise<boolean> => {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
+        video: {
+          width: { ideal: 640, max: 960 },
+          height: { ideal: 360, max: 540 },
+          frameRate: { ideal: 12, max: 15 },
+          facingMode: 'user',
+        },
+        audio: {
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
       });
       streamRef.current = mediaStream;
       setStream(mediaStream);
@@ -57,15 +67,22 @@ export function useRecording(opts: UseRecordingOptions = {}): UseRecordingReturn
 
     chunksRef.current = [];
 
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E,mp4a.40.2')
+      ? 'video/mp4;codecs=avc1.42E01E,mp4a.40.2'
+      : MediaRecorder.isTypeSupported('video/mp4')
+      ? 'video/mp4'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
       ? 'video/webm;codecs=vp9,opus'
       : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
       ? 'video/webm;codecs=vp8,opus'
       : 'video/webm';
 
+    mimeTypeRef.current = mimeType;
+
     const recorder = new MediaRecorder(currentStream, {
       mimeType,
-      videoBitsPerSecond: 500000,
+      videoBitsPerSecond: 250000,
+      audioBitsPerSecond: 48000,
     });
 
     recorder.ondataavailable = (e) => {
@@ -79,7 +96,7 @@ export function useRecording(opts: UseRecordingOptions = {}): UseRecordingReturn
     };
 
     mediaRecorderRef.current = recorder;
-    recorder.start(1000); // collect chunks every second
+    recorder.start();
 
     startTimeRef.current = Date.now();
     timerRef.current = setInterval(() => {
@@ -98,7 +115,7 @@ export function useRecording(opts: UseRecordingOptions = {}): UseRecordingReturn
       }
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
 
         if (timerRef.current) {
           clearInterval(timerRef.current);

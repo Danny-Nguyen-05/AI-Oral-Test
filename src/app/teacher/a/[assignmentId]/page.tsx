@@ -168,6 +168,12 @@ export default function AssignmentDetail() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => router.push('/teacher/dashboard')}
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50 transition"
+          >
+            ← Dashboard
+          </button>
+          <button
             onClick={handlePublish}
             className={`px-4 py-2 rounded-md text-sm transition ${
               assignment.published

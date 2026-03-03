@@ -12,6 +12,31 @@ interface ChatMessage {
   content: string;
 }
 
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionEvent = {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      length: number;
+      [innerIndex: number]: {
+        transcript: string;
+      };
+    };
+  };
+};
+
 export default function AttemptPage() {
   const params = useParams();
   const router = useRouter();
@@ -21,16 +46,22 @@ export default function AttemptPage() {
   const [consent, setConsent] = useState(false);
   const [assignmentData, setAssignmentData] = useState<Record<string, unknown> | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
+  const [speechDraft, setSpeechDraft] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(480);
   const [shouldEnd, setShouldEnd] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recordingBlobRef = useRef<Blob | null>(null);
+  const speechRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const finalTranscriptRef = useRef('');
+  const hasLoggedExtendedDisplayRef = useRef(false);
 
   const { isRecording, duration, stream, startRecording, stopRecording, requestPermissions, hasPermissions } =
     useRecording({ onError: (e) => setError(e) });
@@ -57,6 +88,19 @@ export default function AttemptPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chat]);
+
+  // Speech recognition support check
+  useEffect(() => {
+    const SpeechRecognitionCtor = (window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionInstance;
+      webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+    }).SpeechRecognition
+      || (window as unknown as {
+        webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+      }).webkitSpeechRecognition;
+
+    setSpeechSupported(Boolean(SpeechRecognitionCtor));
+  }, []);
 
   // Time limit enforcement
   useEffect(() => {
@@ -95,6 +139,71 @@ export default function AttemptPage() {
       };
     }
   }, [stream, logIntegrity]);
+
+  // Fullscreen integrity
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsFullscreen(active);
+
+      if (phase === 'interview' && !active) {
+        logIntegrity('fullscreen_exit');
+        setError('Fullscreen is required during assessment. Please re-enter fullscreen.');
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    handleFullscreenChange();
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [phase, logIntegrity]);
+
+  // Best-effort multi-monitor detection
+  useEffect(() => {
+    if (phase !== 'interview') return;
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const checkMultiMonitor = async () => {
+      try {
+        const screenWithExtended = window.screen as Screen & { isExtended?: boolean };
+        if (screenWithExtended.isExtended) {
+          if (!hasLoggedExtendedDisplayRef.current) {
+            hasLoggedExtendedDisplayRef.current = true;
+            logIntegrity('multiple_monitor_detected', { method: 'screen.isExtended' });
+          }
+          return;
+        }
+
+        const windowWithDetails = window as Window & {
+          getScreenDetails?: () => Promise<{ screens?: { isPrimary?: boolean }[] }>;
+        };
+
+        if (typeof windowWithDetails.getScreenDetails === 'function') {
+          const details = await windowWithDetails.getScreenDetails();
+          const screenCount = details.screens?.length || 0;
+          if (screenCount > 1 && !hasLoggedExtendedDisplayRef.current) {
+            hasLoggedExtendedDisplayRef.current = true;
+            logIntegrity('multiple_monitor_detected', {
+              method: 'getScreenDetails',
+              screenCount,
+            });
+          }
+        }
+      } catch {
+        // Not supported/allowed; no-op.
+      }
+    };
+
+    checkMultiMonitor();
+    intervalId = setInterval(checkMultiMonitor, 10000);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [phase, logIntegrity]);
 
   // Fetch assignment settings for time limit
   useEffect(() => {
@@ -165,8 +274,25 @@ export default function AttemptPage() {
     });
   }
 
+  async function requestFullscreenMode() {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      }
+      setIsFullscreen(Boolean(document.fullscreenElement));
+      return true;
+    } catch {
+      setError('Unable to enter fullscreen. Please allow fullscreen and try again.');
+      logIntegrity('fullscreen_request_failed');
+      return false;
+    }
+  }
+
   async function handleStartRecording() {
     if (!hasPermissions || !consent) return;
+
+    const fullscreenOk = await requestFullscreenMode();
+    if (!fullscreenOk) return;
 
     // Update status to ready_to_start, then recording
     await updateStatus('ready_to_start');
@@ -209,18 +335,85 @@ export default function AttemptPage() {
   }
 
   function handleSendMessage() {
-    if (!inputText.trim() || sending) return;
-    const msg = inputText.trim();
-    setInputText('');
+    if (!speechDraft.trim() || sending || isListening) return;
+    const msg = speechDraft.trim();
+    setSpeechDraft('');
+    finalTranscriptRef.current = '';
     sendAITurn(msg);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
+  function startListening() {
+    if (!speechSupported || sending || !isRecording || isListening) return;
+
+    const SpeechRecognitionCtor = (window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionInstance;
+      webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+    }).SpeechRecognition
+      || (window as unknown as {
+        webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+      }).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) {
+      setError('Speech recognition is not supported in this browser.');
+      return;
     }
+
+    setError('');
+    finalTranscriptRef.current = speechDraft.trim();
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event) => {
+      let finalChunk = finalTranscriptRef.current;
+      let interimChunk = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const phrase = event.results[i][0].transcript.trim();
+        if (!phrase) continue;
+
+        if (event.results[i].isFinal) {
+          finalChunk = finalChunk ? `${finalChunk} ${phrase}` : phrase;
+        } else {
+          interimChunk = interimChunk ? `${interimChunk} ${phrase}` : phrase;
+        }
+      }
+
+      finalTranscriptRef.current = finalChunk.trim();
+      const combined = [finalTranscriptRef.current, interimChunk.trim()]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+
+      setSpeechDraft(combined);
+    };
+
+    recognition.onerror = (event) => {
+      setError(`Speech recognition error: ${event.error}`);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
   }
+
+  function stopListening() {
+    speechRecognitionRef.current?.stop();
+    setIsListening(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      speechRecognitionRef.current?.stop();
+    };
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     if (phase === 'uploading' || phase === 'finalizing' || phase === 'done') return;
@@ -249,7 +442,9 @@ export default function AttemptPage() {
 
       formData.append('attemptId', attemptId);
       formData.append('assignmentId', assignmentId);
-      formData.append('file', blob, `${attemptId}.webm`);
+      const recordingExt = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      formData.append('file', blob, `${attemptId}.${recordingExt}`);
+      formData.append('recordingDurationSeconds', String(duration));
 
       // Simulated progress
       const progressInterval = setInterval(() => {
@@ -426,6 +621,11 @@ export default function AttemptPage() {
           <span className={`text-sm font-mono ${remaining < 60 ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
             {formatTime(remaining)} remaining
           </span>
+            {!isFullscreen && (
+              <span className="text-xs text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded">
+                Fullscreen required
+              </span>
+            )}
         </div>
         <button
           onClick={handleSubmit}
@@ -493,29 +693,60 @@ export default function AttemptPage() {
                 The interviewer has indicated the session should end. You can submit now.
               </div>
             )}
+            {!isFullscreen && (
+              <div className="mb-3 p-2 bg-orange-50 border border-orange-200 rounded text-sm text-orange-700 flex items-center justify-between gap-3">
+                <span>You exited fullscreen. Re-enter fullscreen to continue safely.</span>
+                <button
+                  onClick={requestFullscreenMode}
+                  className="px-3 py-1.5 bg-orange-600 text-white rounded text-xs hover:bg-orange-700 transition"
+                >
+                  Re-enter Fullscreen
+                </button>
+              </div>
+            )}
             {error && (
               <p className="text-red-600 text-sm mb-2">{error}</p>
             )}
-            <div className="flex gap-2">
+            {!speechSupported && (
+              <p className="text-sm text-red-600 mb-2">
+                Voice input is not supported in this browser. Please use Chrome or Edge.
+              </p>
+            )}
+            <div className="flex gap-2 items-end">
               <textarea
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your response... (Enter to send, Shift+Enter for new line)"
-                rows={2}
-                disabled={!isRecording || sending}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50"
+                value={speechDraft}
+                readOnly
+                placeholder="Your speech transcript will appear here..."
+                rows={4}
+                disabled
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none bg-gray-50 text-gray-700 overflow-y-auto"
               />
+              {!isListening ? (
+                <button
+                  onClick={startListening}
+                  disabled={!isRecording || sending || !speechSupported || !isFullscreen}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 transition"
+                >
+                  Speak
+                </button>
+              ) : (
+                <button
+                  onClick={stopListening}
+                  className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800 transition"
+                >
+                  Stop
+                </button>
+              )}
               <button
                 onClick={handleSendMessage}
-                disabled={!isRecording || sending || !inputText.trim()}
+                disabled={!isRecording || sending || isListening || !speechDraft.trim() || !isFullscreen}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition self-end"
               >
                 Send
               </button>
             </div>
             <p className="text-xs text-gray-400 mt-2">
-              Remember to speak your thought process out loud while typing.
+              Voice-only mode: click Speak, answer out loud, then click Stop and Send.
             </p>
           </div>
         </div>
