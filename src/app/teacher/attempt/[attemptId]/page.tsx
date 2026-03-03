@@ -14,6 +14,7 @@ export default function AttemptDetail() {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [integrityEvents, setIntegrityEvents] = useState<IntegrityEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
 
   const [overrideScore, setOverrideScore] = useState('');
   const [overrideNote, setOverrideNote] = useState('');
@@ -53,6 +54,55 @@ export default function AttemptDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    async function preparePlaybackUrl() {
+      if (!attempt?.recording_url) {
+        setPlaybackUrl(null);
+        return;
+      }
+
+      const path = extractRecordingPath(attempt.recording_url);
+      if (!path) {
+        setPlaybackUrl(attempt.recording_url);
+        return;
+      }
+
+      const { data, error } = await supabase.storage
+        .from('recordings')
+        .createSignedUrl(path, 60 * 60);
+
+      if (error || !data?.signedUrl) {
+        setPlaybackUrl(attempt.recording_url);
+        return;
+      }
+
+      setPlaybackUrl(data.signedUrl);
+    }
+
+    preparePlaybackUrl();
+  }, [attempt?.recording_url]);
+
+  function extractRecordingPath(recordingUrl: string): string | null {
+    if (!recordingUrl) return null;
+
+    if (!recordingUrl.includes('/recordings/')) {
+      return recordingUrl;
+    }
+
+    const marker = '/recordings/';
+    const start = recordingUrl.indexOf(marker);
+    if (start === -1) return null;
+
+    const afterBucket = recordingUrl.slice(start + marker.length);
+    const path = afterBucket.split('?')[0];
+
+    try {
+      return decodeURIComponent(path);
+    } catch {
+      return path;
+    }
+  }
 
   async function handleSaveOverride() {
     setSavingOverride(true);
@@ -113,7 +163,7 @@ export default function AttemptDetail() {
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
               <h2 className="text-lg font-semibold text-gray-900 mb-3">Recording</h2>
               <video
-                src={attempt.recording_url}
+                src={playbackUrl || attempt.recording_url}
                 controls
                 className="w-full rounded-md bg-black"
               />

@@ -1,35 +1,49 @@
 // ============================================================
-// AI provider abstraction – calls OpenAI-compatible API
+// AI provider abstraction – calls Google Gemini API
 // ============================================================
 
 export async function callAI(systemPrompt: string, userMessage: string): Promise<string> {
   const apiKey = process.env.AI_PROVIDER_API_KEY;
-  const model = process.env.AI_MODEL_NAME || 'gpt-4o';
+  const model = process.env.AI_MODEL_NAME || 'gemini-3-flash-preview';
 
   if (!apiKey) throw new Error('AI_PROVIDER_API_KEY not configured');
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
+      systemInstruction: {
+        parts: [{ text: systemPrompt }],
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: userMessage }],
+        },
       ],
-      temperature: 0.4,
-      response_format: { type: 'json_object' },
+      generationConfig: {
+        temperature: 0.4,
+        responseMimeType: 'application/json',
+      },
     }),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`AI API error ${response.status}: ${text}`);
+    throw new Error(`Gemini API error ${response.status}: ${text}`);
   }
 
   const data = await response.json();
-  return data.choices[0].message.content;
+  const content = data?.candidates?.[0]?.content?.parts
+    ?.map((part: { text?: string }) => part.text || '')
+    .join('')
+    .trim();
+
+  if (!content) {
+    throw new Error('Gemini returned empty content');
+  }
+
+  return content;
 }
