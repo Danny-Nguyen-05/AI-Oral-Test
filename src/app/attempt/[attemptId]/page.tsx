@@ -1,0 +1,525 @@
+'use client';
+
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useRecording } from '@/hooks/useRecording';
+import { useIntegrity } from '@/hooks/useIntegrity';
+
+type Phase = 'consent' | 'interview' | 'uploading' | 'finalizing' | 'done';
+
+interface ChatMessage {
+  role: 'ai' | 'student';
+  content: string;
+}
+
+export default function AttemptPage() {
+  const params = useParams();
+  const router = useRouter();
+  const attemptId = params.attemptId as string;
+
+  const [phase, setPhase] = useState<Phase>('consent');
+  const [consent, setConsent] = useState(false);
+  const [assignmentData, setAssignmentData] = useState<Record<string, unknown> | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [timeLimitSeconds, setTimeLimitSeconds] = useState(480);
+  const [shouldEnd, setShouldEnd] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const recordingBlobRef = useRef<Blob | null>(null);
+
+  const { isRecording, duration, stream, startRecording, stopRecording, requestPermissions, hasPermissions } =
+    useRecording({ onError: (e) => setError(e) });
+
+  const { logIntegrity } = useIntegrity({ attemptId, enabled: phase === 'interview' });
+
+  // Load attempt data
+  useEffect(() => {
+    const stored = localStorage.getItem(`attempt_${attemptId}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      setAssignmentData(parsed);
+    }
+  }, [attemptId]);
+
+  // Set video preview from stream
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chat]);
+
+  // Time limit enforcement
+  useEffect(() => {
+    if (!isRecording) return;
+    if (duration >= timeLimitSeconds) {
+      handleSubmit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration, timeLimitSeconds, isRecording]);
+
+  // Monitor media track events
+  useEffect(() => {
+    if (!stream) return;
+
+    const videoTrack = stream.getVideoTracks()[0];
+    const audioTrack = stream.getAudioTracks()[0];
+
+    if (videoTrack) {
+      videoTrack.onended = () => {
+        logIntegrity('camera_ended');
+      };
+      videoTrack.onmute = () => {
+        logIntegrity('camera_muted');
+      };
+    }
+
+    if (audioTrack) {
+      audioTrack.onended = () => {
+        logIntegrity('mic_ended');
+      };
+      audioTrack.onmute = () => {
+        logIntegrity('mic_muted');
+      };
+      audioTrack.onunmute = () => {
+        logIntegrity('mic_unmuted');
+      };
+    }
+  }, [stream, logIntegrity]);
+
+  // Fetch assignment settings for time limit
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        const stored = localStorage.getItem(`attempt_${attemptId}`);
+        if (!stored) return;
+        const { assignmentId } = JSON.parse(stored);
+
+        const res = await fetch('/api/student/createAttempt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignmentId, studentName: '__probe__' }),
+        });
+
+        // We don't actually want to create another attempt, just get settings
+        // Instead, use the stored data or a separate endpoint
+        // For MVP, we'll use default
+        void res;
+      } catch {
+        // Use default time limit
+      }
+    }
+
+    // Instead, load from the createAttempt response stored in localStorage
+    const stored = localStorage.getItem(`attempt_${attemptId}`);
+    if (!stored) return;
+
+    // We need to fetch assignment data properly
+    async function loadAssignment() {
+      try {
+        const storedData = localStorage.getItem(`attempt_${attemptId}`);
+        if (!storedData) return;
+        const { assignmentId } = JSON.parse(storedData);
+
+        // Fetch from public_assignments view using supabase client
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+
+        const { data } = await supabase
+          .from('assignments')
+          .select('time_limit_seconds, title, topic, question_bank')
+          .eq('id', assignmentId)
+          .eq('published', true)
+          .single();
+
+        if (data) {
+          setTimeLimitSeconds(data.time_limit_seconds || 480);
+          setAssignmentData((prev) => ({ ...prev, ...data }));
+        }
+      } catch {
+        // Use defaults
+      }
+    }
+
+    loadAssignment();
+    void fetchSettings;
+  }, [attemptId]);
+
+  async function updateStatus(status: string, extras?: Record<string, unknown>) {
+    await fetch('/api/student/updateStatus', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attemptId, status, ...extras }),
+    });
+  }
+
+  async function handleStartRecording() {
+    if (!hasPermissions || !consent) return;
+
+    // Update status to ready_to_start, then recording
+    await updateStatus('ready_to_start');
+    await startRecording();
+    await updateStatus('recording');
+    setPhase('interview');
+
+    // Send initial AI turn to get the first question
+    await sendAITurn('Hello, I am ready to begin the assessment.');
+  }
+
+  async function sendAITurn(message: string) {
+    setSending(true);
+    setError('');
+
+    try {
+      // Add student message to chat
+      if (message !== 'Hello, I am ready to begin the assessment.') {
+        setChat((prev) => [...prev, { role: 'student', content: message }]);
+      }
+
+      const res = await fetch('/api/ai/turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId, studentMessage: message }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setChat((prev) => [...prev, { role: 'ai', content: data.ai_message }]);
+
+      if (data.should_end) {
+        setShouldEnd(true);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to communicate with AI');
+    }
+    setSending(false);
+  }
+
+  function handleSendMessage() {
+    if (!inputText.trim() || sending) return;
+    const msg = inputText.trim();
+    setInputText('');
+    sendAITurn(msg);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  }
+
+  const handleSubmit = useCallback(async () => {
+    if (phase === 'uploading' || phase === 'finalizing' || phase === 'done') return;
+
+    setPhase('uploading');
+    setError('');
+
+    try {
+      // Stop recording
+      const blob = await stopRecording();
+      if (!blob) {
+        setError('No recording data available');
+        setPhase('interview');
+        return;
+      }
+
+      recordingBlobRef.current = blob;
+
+      // Update status to uploading
+      await updateStatus('uploading_recording');
+
+      // Upload recording via server route
+      const formData = new FormData();
+      const stored = localStorage.getItem(`attempt_${attemptId}`);
+      const { assignmentId } = stored ? JSON.parse(stored) : { assignmentId: '' };
+
+      formData.append('attemptId', attemptId);
+      formData.append('assignmentId', assignmentId);
+      formData.append('file', blob, `${attemptId}.webm`);
+
+      // Simulated progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => Math.min(prev + 10, 90));
+      }, 500);
+
+      const res = await fetch('/api/student/uploadRecording', {
+        method: 'POST',
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setUploadProgress(100);
+
+      // Now finalize grading
+      setPhase('finalizing');
+
+      const finalRes = await fetch('/api/ai/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId }),
+      });
+
+      const finalData = await finalRes.json();
+      if (!finalRes.ok) throw new Error(finalData.error);
+
+      setPhase('done');
+      router.push(`/attempt/${attemptId}/done`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+      setPhase('interview');
+      await updateStatus('recording_failed').catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attemptId, phase, stopRecording, router]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const remaining = Math.max(0, timeLimitSeconds - duration);
+  const hasStudentResponse = chat.some((m) => m.role === 'student');
+
+  // ======== CONSENT GATE ========
+  if (phase === 'consent') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md max-w-lg w-full space-y-6">
+          <h1 className="text-2xl font-bold text-gray-900 text-center">
+            {(assignmentData as Record<string, unknown>)?.title as string || 'Assessment'}
+          </h1>
+
+          {/* Camera Preview */}
+          <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+            />
+            {!hasPermissions && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-80">
+                <p className="text-white text-sm">Camera preview will appear here</p>
+              </div>
+            )}
+          </div>
+
+          {/* Permission Button */}
+          {!hasPermissions ? (
+            <button
+              onClick={requestPermissions}
+              className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            >
+              Grant Camera & Microphone Access
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 text-green-600 text-sm">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Camera and microphone access granted
+            </div>
+          )}
+
+          {/* Consent Checkbox */}
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              className="mt-1 w-4 h-4 text-blue-600 rounded"
+            />
+            <span className="text-sm text-gray-700">
+              I consent to being recorded during this assessment. I understand that the recording
+              will be reviewed by my instructor. I will speak my thought process out loud while
+              typing my answers.
+            </span>
+          </label>
+
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+
+          {/* Start Button */}
+          <button
+            onClick={handleStartRecording}
+            disabled={!hasPermissions || !consent}
+            className="w-full py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+          >
+            Start Assessment
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ======== UPLOADING ========
+  if (phase === 'uploading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full space-y-6 text-center">
+          <h2 className="text-xl font-bold text-gray-900">Uploading Recording...</h2>
+          <div className="w-full bg-gray-200 rounded-full h-3">
+            <div
+              className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+          <p className="text-sm text-gray-500">{uploadProgress}% complete</p>
+          <p className="text-xs text-gray-400">
+            Please do not close this page. Your submission is only valid after upload completes.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ======== FINALIZING ========
+  if (phase === 'finalizing') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full space-y-4 text-center">
+          <h2 className="text-xl font-bold text-gray-900">Grading Your Submission...</h2>
+          <div className="animate-pulse flex justify-center">
+            <div className="w-12 h-12 bg-blue-200 rounded-full" />
+          </div>
+          <p className="text-sm text-gray-500">AI is reviewing your responses. This may take a moment.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ======== INTERVIEW ========
+  return (
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* Top Bar */}
+      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          {/* Recording Indicator */}
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+            <span className="text-sm font-medium text-red-600">REC</span>
+          </div>
+          {/* Timer */}
+          <span className={`text-sm font-mono ${remaining < 60 ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
+            {formatTime(remaining)} remaining
+          </span>
+        </div>
+        <button
+          onClick={handleSubmit}
+          disabled={!hasStudentResponse || sending}
+          className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 disabled:opacity-50 transition"
+        >
+          Submit Assessment
+        </button>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Camera Preview (sidebar) */}
+        <div className="w-48 bg-black flex-shrink-0 relative">
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute bottom-2 left-2 right-2">
+            <div className="bg-black bg-opacity-60 rounded px-2 py-1 text-xs text-white text-center">
+              {formatTime(duration)}
+            </div>
+          </div>
+        </div>
+
+        {/* Main Interview Panel */}
+        <div className="flex-1 flex flex-col">
+          {/* Chat Area */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {chat.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex ${msg.role === 'student' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[80%] p-3 rounded-lg text-sm ${
+                    msg.role === 'ai'
+                      ? 'bg-blue-50 text-blue-900 border border-blue-100'
+                      : 'bg-gray-100 text-gray-900 border border-gray-200'
+                  }`}
+                >
+                  <p className="text-xs font-medium mb-1 opacity-60">
+                    {msg.role === 'ai' ? '🤖 CodeCoach' : '👤 You'}
+                  </p>
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                </div>
+              </div>
+            ))}
+            {sending && (
+              <div className="flex justify-start">
+                <div className="bg-blue-50 p-3 rounded-lg text-sm border border-blue-100">
+                  <p className="text-blue-600 animate-pulse">CodeCoach is thinking...</p>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Input Area */}
+          <div className="border-t border-gray-200 bg-white p-4">
+            {shouldEnd && (
+              <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-700">
+                The interviewer has indicated the session should end. You can submit now.
+              </div>
+            )}
+            {error && (
+              <p className="text-red-600 text-sm mb-2">{error}</p>
+            )}
+            <div className="flex gap-2">
+              <textarea
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type your response... (Enter to send, Shift+Enter for new line)"
+                rows={2}
+                disabled={!isRecording || sending}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50"
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={!isRecording || sending || !inputText.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition self-end"
+              >
+                Send
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">
+              Remember to speak your thought process out loud while typing.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
