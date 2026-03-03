@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useRecording } from '@/hooks/useRecording';
 import { useIntegrity } from '@/hooks/useIntegrity';
 import MarkdownMessage from '@/components/MarkdownMessage';
+import { supabase } from '@/lib/supabase/client';
 
 type Phase = 'consent' | 'interview' | 'uploading' | 'finalizing' | 'done';
 
@@ -494,25 +495,46 @@ export default function AttemptPage() {
       // Update status to uploading
       await updateStatus('uploading_recording');
 
-      // Upload recording via server route
-      const formData = new FormData();
+      // Upload recording directly from client to Supabase Storage
       const stored = localStorage.getItem(`attempt_${attemptId}`);
       const { assignmentId } = stored ? JSON.parse(stored) : { assignmentId: '' };
 
-      formData.append('attemptId', attemptId);
-      formData.append('assignmentId', assignmentId);
-      const recordingExt = blob.type.includes('mp4') ? 'mp4' : 'webm';
-      formData.append('file', blob, `${attemptId}.${recordingExt}`);
-      formData.append('recordingDurationSeconds', String(duration));
+      if (!assignmentId) {
+        throw new Error('Missing assignmentId for upload');
+      }
+
+      const recordingExt = 'webm';
+      const storagePath = `${assignmentId}/${attemptId}.${recordingExt}`;
 
       // Simulated progress
       const progressInterval = setInterval(() => {
         setUploadProgress((prev) => Math.min(prev + 10, 90));
       }, 500);
 
+      const { error: storageError } = await supabase.storage
+        .from('recordings')
+        .upload(storagePath, blob, {
+          contentType: blob.type || 'video/webm',
+          upsert: true,
+        });
+
+      if (storageError) {
+        clearInterval(progressInterval);
+        throw new Error(storageError.message);
+      }
+
+      setUploadProgress(95);
+
       const res = await fetch('/api/student/uploadRecording', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attemptId,
+          assignmentId,
+          storagePath,
+          recordingDurationSeconds: duration,
+          recordingSizeBytes: blob.size,
+        }),
       });
 
       clearInterval(progressInterval);

@@ -29,7 +29,7 @@ export function useRecording(opts: UseRecordingOptions = {}): UseRecordingReturn
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
-  const mimeTypeRef = useRef<string>('video/webm');
+  const mimeTypeRef = useRef<string>('video/webm;codecs=vp8,opus');
 
   const requestPermissions = useCallback(async (): Promise<boolean> => {
     try {
@@ -67,11 +67,7 @@ export function useRecording(opts: UseRecordingOptions = {}): UseRecordingReturn
 
     chunksRef.current = [];
 
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E,mp4a.40.2')
-      ? 'video/mp4;codecs=avc1.42E01E,mp4a.40.2'
-      : MediaRecorder.isTypeSupported('video/mp4')
-      ? 'video/mp4'
-      : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
       ? 'video/webm;codecs=vp9,opus'
       : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
       ? 'video/webm;codecs=vp8,opus'
