@@ -81,13 +81,22 @@ export default function AttemptPage() {
 
   const { logIntegrity } = useIntegrity({ attemptId, enabled: phase === 'interview' });
 
+  function getStoredAttemptData(): Record<string, unknown> | null {
+    const stored = localStorage.getItem(`attempt_${attemptId}`);
+    if (!stored) return null;
+
+    try {
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
   // Load attempt data
   useEffect(() => {
-    const stored = localStorage.getItem(`attempt_${attemptId}`);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      setAssignmentData(parsed);
-    }
+    const parsed = getStoredAttemptData();
+    if (parsed) setAssignmentData(parsed);
   }, [attemptId]);
 
   // Set video preview from stream
@@ -242,37 +251,11 @@ export default function AttemptPage() {
 
   // Fetch assignment settings for time limit
   useEffect(() => {
-    async function fetchSettings() {
-      try {
-        const stored = localStorage.getItem(`attempt_${attemptId}`);
-        if (!stored) return;
-        const { assignmentId } = JSON.parse(stored);
-
-        const res = await fetch('/api/student/createAttempt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assignmentId, studentName: '__probe__' }),
-        });
-
-        // We don't actually want to create another attempt, just get settings
-        // Instead, use the stored data or a separate endpoint
-        // For MVP, we'll use default
-        void res;
-      } catch {
-        // Use default time limit
-      }
-    }
-
-    // Instead, load from the createAttempt response stored in localStorage
-    const stored = localStorage.getItem(`attempt_${attemptId}`);
-    if (!stored) return;
-
-    // We need to fetch assignment data properly
     async function loadAssignment() {
       try {
-        const storedData = localStorage.getItem(`attempt_${attemptId}`);
-        if (!storedData) return;
-        const { assignmentId } = JSON.parse(storedData);
+        const parsed = getStoredAttemptData();
+        const assignmentId = typeof parsed?.assignmentId === 'string' ? parsed.assignmentId : '';
+        if (!assignmentId) return;
 
         // Fetch from public_assignments view using supabase client
         const { createClient } = await import('@supabase/supabase-js');
@@ -298,7 +281,6 @@ export default function AttemptPage() {
     }
 
     loadAssignment();
-    void fetchSettings;
   }, [attemptId]);
 
   async function updateStatus(status: string, extras?: Record<string, unknown>) {
@@ -480,6 +462,7 @@ export default function AttemptPage() {
 
     setPhase('uploading');
     setError('');
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
 
     try {
       // Stop recording
@@ -496,8 +479,8 @@ export default function AttemptPage() {
       await updateStatus('uploading_recording');
 
       // Upload recording directly from client to Supabase Storage
-      const stored = localStorage.getItem(`attempt_${attemptId}`);
-      const { assignmentId } = stored ? JSON.parse(stored) : { assignmentId: '' };
+      const parsed = getStoredAttemptData();
+      const assignmentId = typeof parsed?.assignmentId === 'string' ? parsed.assignmentId : '';
 
       if (!assignmentId) {
         throw new Error('Missing assignmentId for upload');
@@ -507,7 +490,7 @@ export default function AttemptPage() {
       const storagePath = `${assignmentId}/${attemptId}.${recordingExt}`;
 
       // Simulated progress
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         setUploadProgress((prev) => Math.min(prev + 10, 90));
       }, 500);
 
@@ -519,7 +502,6 @@ export default function AttemptPage() {
         });
 
       if (storageError) {
-        clearInterval(progressInterval);
         throw new Error(storageError.message);
       }
 
@@ -536,8 +518,6 @@ export default function AttemptPage() {
           recordingSizeBytes: blob.size,
         }),
       });
-
-      clearInterval(progressInterval);
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -562,6 +542,10 @@ export default function AttemptPage() {
       setError(err instanceof Error ? err.message : 'Upload failed');
       setPhase('interview');
       await updateStatus('recording_failed').catch(() => {});
+    } finally {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attemptId, phase, stopRecording, router]);
