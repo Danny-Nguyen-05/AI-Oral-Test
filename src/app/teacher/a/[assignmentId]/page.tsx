@@ -17,14 +17,17 @@ export default function AssignmentDetail() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Editable problem fields
   const [problemTitle, setProblemTitle] = useState('');
   const [problemDesc, setProblemDesc] = useState('');
   const [followups, setFollowups] = useState<string[]>([]);
   const [conceptTargets, setConceptTargets] = useState<string[]>([]);
+  const [hasUnsavedQuestionDraft, setHasUnsavedQuestionDraft] = useState(false);
 
   const loadAssignment = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
     if (!session) {
       router.push('/teacher/login');
       return;
@@ -40,13 +43,22 @@ export default function AssignmentDetail() {
       const a = data as Assignment;
       setAssignment(a);
       const qb = a.question_bank as QuestionBank | null;
+
       if (qb?.selected_problem) {
         setProblemTitle(qb.selected_problem.title);
         setProblemDesc(qb.selected_problem.description);
         setFollowups(qb.selected_problem.followups || []);
         setConceptTargets(qb.selected_problem.concept_targets || []);
+      } else {
+        setProblemTitle('');
+        setProblemDesc('');
+        setFollowups([]);
+        setConceptTargets([]);
       }
+
+      setHasUnsavedQuestionDraft(false);
     }
+
     setLoading(false);
   }, [assignmentId, router]);
 
@@ -56,8 +68,10 @@ export default function AssignmentDetail() {
 
   async function handleGenerate() {
     if (!assignment) return;
+
     setGenerating(true);
     setError('');
+    setSuccess('');
 
     try {
       const res = await fetch('/api/ai/generateQuestion', {
@@ -73,37 +87,45 @@ export default function AssignmentDetail() {
       if (!res.ok) throw new Error(data.error);
 
       const sp: SelectedProblem = data.selected_problem;
-      setProblemTitle(sp.title);
-      setProblemDesc(sp.description);
-      setFollowups(sp.followups);
-      setConceptTargets(sp.concept_targets);
-
-      // Save to DB
-      await supabase
-        .from('assignments')
-        .update({
-          question_bank: { selected_problem: sp },
-        })
-        .eq('id', assignmentId);
-
-      setSuccess('Question generated successfully!');
+      setProblemTitle(sp.title || '');
+      setProblemDesc(sp.description || '');
+      setFollowups(sp.followups || []);
+      setConceptTargets(sp.concept_targets || []);
+      setHasUnsavedQuestionDraft(true);
+      setSuccess('Question generated. Review or modify it, then click Save Problem to approve.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate');
     }
+
     setGenerating(false);
   }
 
+  function handleCreateManualQuestion() {
+    setError('');
+    setSuccess('Create your own question, then click Save Problem to approve.');
+    setProblemTitle('');
+    setProblemDesc('');
+    setFollowups(['']);
+    setConceptTargets(['']);
+    setHasUnsavedQuestionDraft(true);
+  }
+
   async function handleSaveProblem() {
+    if (!problemTitle.trim() || !problemDesc.trim()) {
+      setError('Problem title and description are required');
+      return;
+    }
+
     setSaving(true);
     setError('');
 
     const qb = assignment?.question_bank as QuestionBank | null;
     const sp: SelectedProblem = {
       id: qb?.selected_problem?.id || crypto.randomUUID(),
-      title: problemTitle,
-      description: problemDesc,
-      followups,
-      concept_targets: conceptTargets,
+      title: problemTitle.trim(),
+      description: problemDesc.trim(),
+      followups: followups.map((f) => f.trim()).filter(Boolean),
+      concept_targets: conceptTargets.map((c) => c.trim()).filter(Boolean),
     };
 
     const { error: uErr } = await supabase
@@ -114,15 +136,17 @@ export default function AssignmentDetail() {
     if (uErr) {
       setError(uErr.message);
     } else {
-      setSuccess('Problem saved!');
+      setSuccess('Problem saved and approved!');
+      setHasUnsavedQuestionDraft(false);
       loadAssignment();
     }
+
     setSaving(false);
   }
 
   async function handlePublish() {
     if (!assignment?.question_bank) {
-      setError('Generate or create a question before publishing');
+      setError('Create or generate + save a question before publishing');
       return;
     }
 
@@ -210,111 +234,145 @@ export default function AssignmentDetail() {
       {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
       {success && <p className="text-green-600 text-sm mb-4">{success}</p>}
 
-      {/* Question Bank Section */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Question Bank</h2>
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 transition"
-          >
-            {generating ? 'Generating...' : 'Generate Question Bank'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCreateManualQuestion}
+              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50 transition"
+            >
+              Create Manually
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 transition"
+            >
+              {generating ? 'Generating...' : 'Generate Question Bank'}
+            </button>
+          </div>
         </div>
 
-        {problemTitle ? (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Problem Title</label>
-              <input
-                value={problemTitle}
-                onChange={(e) => setProblemTitle(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Problem Description</label>
-              <textarea
-                value={problemDesc}
-                onChange={(e) => setProblemDesc(e.target.value)}
-                rows={4}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Followup Questions</label>
-              {followups.map((f, i) => (
-                <div key={i} className="flex gap-2 mb-2">
+        {!problemTitle && !problemDesc && followups.length === 0 && conceptTargets.length === 0 && (
+          <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm text-gray-600 mb-4">
+            Choose <strong>Create Manually</strong> to write your own question, or <strong>Generate Question Bank</strong> and then approve it by clicking <strong>Save Problem</strong>.
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Problem Title</label>
+            <input
+              value={problemTitle}
+              onChange={(e) => {
+                setProblemTitle(e.target.value);
+                setHasUnsavedQuestionDraft(true);
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Problem Description</label>
+            <textarea
+              value={problemDesc}
+              onChange={(e) => {
+                setProblemDesc(e.target.value);
+                setHasUnsavedQuestionDraft(true);
+              }}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Followup Questions</label>
+            {followups.map((f, i) => (
+              <div key={i} className="flex gap-2 mb-2">
+                <input
+                  value={f}
+                  onChange={(e) => {
+                    const updated = [...followups];
+                    updated[i] = e.target.value;
+                    setFollowups(updated);
+                    setHasUnsavedQuestionDraft(true);
+                  }}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    setFollowups(followups.filter((_, j) => j !== i));
+                    setHasUnsavedQuestionDraft(true);
+                  }}
+                  className="text-red-500 text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                setFollowups([...followups, '']);
+                setHasUnsavedQuestionDraft(true);
+              }}
+              className="text-sm text-blue-600 hover:text-blue-700"
+            >
+              + Add Followup
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Concept Targets</label>
+            <div className="flex flex-wrap gap-2">
+              {conceptTargets.map((c, i) => (
+                <span key={i} className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded text-sm">
                   <input
-                    value={f}
+                    value={c}
                     onChange={(e) => {
-                      const u = [...followups];
-                      u[i] = e.target.value;
-                      setFollowups(u);
+                      const updated = [...conceptTargets];
+                      updated[i] = e.target.value;
+                      setConceptTargets(updated);
+                      setHasUnsavedQuestionDraft(true);
                     }}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    className="bg-transparent border-none text-sm w-auto focus:outline-none"
+                    size={c.length || 10}
                   />
                   <button
-                    onClick={() => setFollowups(followups.filter((_, j) => j !== i))}
-                    className="text-red-500 text-sm"
+                    onClick={() => {
+                      setConceptTargets(conceptTargets.filter((_, j) => j !== i));
+                      setHasUnsavedQuestionDraft(true);
+                    }}
+                    className="text-red-400 hover:text-red-600"
                   >
                     ✕
                   </button>
-                </div>
+                </span>
               ))}
               <button
-                onClick={() => setFollowups([...followups, ''])}
+                onClick={() => {
+                  setConceptTargets([...conceptTargets, '']);
+                  setHasUnsavedQuestionDraft(true);
+                }}
                 className="text-sm text-blue-600 hover:text-blue-700"
               >
-                + Add Followup
+                + Add
               </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Concept Targets</label>
-              <div className="flex flex-wrap gap-2">
-                {conceptTargets.map((c, i) => (
-                  <span key={i} className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded text-sm">
-                    <input
-                      value={c}
-                      onChange={(e) => {
-                        const u = [...conceptTargets];
-                        u[i] = e.target.value;
-                        setConceptTargets(u);
-                      }}
-                      className="bg-transparent border-none text-sm w-auto focus:outline-none"
-                      size={c.length || 10}
-                    />
-                    <button
-                      onClick={() => setConceptTargets(conceptTargets.filter((_, j) => j !== i))}
-                      className="text-red-400 hover:text-red-600"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-                <button
-                  onClick={() => setConceptTargets([...conceptTargets, ''])}
-                  className="text-sm text-blue-600 hover:text-blue-700"
-                >
-                  + Add
-                </button>
-              </div>
-            </div>
-
-            <button
-              onClick={handleSaveProblem}
-              disabled={saving}
-              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 transition"
-            >
-              {saving ? 'Saving...' : 'Save Problem'}
-            </button>
           </div>
-        ) : (
-          <p className="text-gray-500 text-sm">
-            No question generated yet. Click &quot;Generate Question Bank&quot; to create one.
-          </p>
-        )}
+
+          {hasUnsavedQuestionDraft && (
+            <p className="text-xs text-amber-600">You have unsaved question changes.</p>
+          )}
+
+          <button
+            onClick={handleSaveProblem}
+            disabled={saving}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 transition"
+          >
+            {saving ? 'Saving...' : 'Save Problem'}
+          </button>
+        </div>
       </div>
     </div>
   );

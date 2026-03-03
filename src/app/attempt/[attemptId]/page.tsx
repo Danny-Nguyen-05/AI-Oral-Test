@@ -12,6 +12,11 @@ interface ChatMessage {
   content: string;
 }
 
+interface SendAITurnOptions {
+  skipStudentChat?: boolean;
+  timerWrapUp?: boolean;
+}
+
 type SpeechRecognitionInstance = {
   continuous: boolean;
   interimResults: boolean;
@@ -54,7 +59,10 @@ export default function AttemptPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(480);
   const [shouldEnd, setShouldEnd] = useState(false);
+  const [endCountdown, setEndCountdown] = useState<number | null>(null);
+  const [wrapUpRequested, setWrapUpRequested] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMultiMonitorDetected, setIsMultiMonitorDetected] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -62,6 +70,9 @@ export default function AttemptPage() {
   const speechRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const finalTranscriptRef = useRef('');
   const hasLoggedExtendedDisplayRef = useRef(false);
+  const hasLoggedFullscreenExitRef = useRef(false);
+  const hasAnnouncedEndRef = useRef(false);
+  const hasStartedAutoSubmitRef = useRef(false);
 
   const { isRecording, duration, stream, startRecording, stopRecording, requestPermissions, hasPermissions } =
     useRecording({ onError: (e) => setError(e) });
@@ -147,8 +158,19 @@ export default function AttemptPage() {
       setIsFullscreen(active);
 
       if (phase === 'interview' && !active) {
-        logIntegrity('fullscreen_exit');
+        if (!hasLoggedFullscreenExitRef.current) {
+          hasLoggedFullscreenExitRef.current = true;
+          logIntegrity('fullscreen_exit');
+        }
         setError('Fullscreen is required during assessment. Please re-enter fullscreen.');
+      }
+
+      if (active) {
+        setError((prev) =>
+          prev === 'Fullscreen is required during assessment. Please re-enter fullscreen.'
+            ? ''
+            : prev
+        );
       }
     };
 
@@ -168,13 +190,16 @@ export default function AttemptPage() {
 
     const checkMultiMonitor = async () => {
       try {
+        let detected = false;
+
         const screenWithExtended = window.screen as Screen & { isExtended?: boolean };
         if (screenWithExtended.isExtended) {
+          detected = true;
+          setIsMultiMonitorDetected(true);
           if (!hasLoggedExtendedDisplayRef.current) {
             hasLoggedExtendedDisplayRef.current = true;
             logIntegrity('multiple_monitor_detected', { method: 'screen.isExtended' });
           }
-          return;
         }
 
         const windowWithDetails = window as Window & {
@@ -184,13 +209,21 @@ export default function AttemptPage() {
         if (typeof windowWithDetails.getScreenDetails === 'function') {
           const details = await windowWithDetails.getScreenDetails();
           const screenCount = details.screens?.length || 0;
-          if (screenCount > 1 && !hasLoggedExtendedDisplayRef.current) {
-            hasLoggedExtendedDisplayRef.current = true;
-            logIntegrity('multiple_monitor_detected', {
-              method: 'getScreenDetails',
-              screenCount,
-            });
+          if (screenCount > 1) {
+            detected = true;
+            setIsMultiMonitorDetected(true);
+            if (!hasLoggedExtendedDisplayRef.current) {
+              hasLoggedExtendedDisplayRef.current = true;
+              logIntegrity('multiple_monitor_detected', {
+                method: 'getScreenDetails',
+                screenCount,
+              });
+            }
           }
+        }
+
+        if (!detected) {
+          setIsMultiMonitorDetected(false);
         }
       } catch {
         // Not supported/allowed; no-op.
@@ -304,20 +337,24 @@ export default function AttemptPage() {
     await sendAITurn('Hello, I am ready to begin the assessment.');
   }
 
-  async function sendAITurn(message: string) {
+  async function sendAITurn(message: string, options: SendAITurnOptions = {}) {
     setSending(true);
     setError('');
 
     try {
       // Add student message to chat
-      if (message !== 'Hello, I am ready to begin the assessment.') {
+      if (!options.skipStudentChat && message !== 'Hello, I am ready to begin the assessment.') {
         setChat((prev) => [...prev, { role: 'student', content: message }]);
       }
 
       const res = await fetch('/api/ai/turn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attemptId, studentMessage: message }),
+        body: JSON.stringify({
+          attemptId,
+          studentMessage: message,
+          timerWrapUp: options.timerWrapUp || false,
+        }),
       });
 
       const data = await res.json();
@@ -326,7 +363,18 @@ export default function AttemptPage() {
       setChat((prev) => [...prev, { role: 'ai', content: data.ai_message }]);
 
       if (data.should_end) {
+        if (!hasAnnouncedEndRef.current) {
+          hasAnnouncedEndRef.current = true;
+          setChat((prev) => [
+            ...prev,
+            {
+              role: 'ai',
+              content: 'I am wrapping up this assessment now. Your submission will be auto-submitted in 5 seconds.',
+            },
+          ]);
+        }
         setShouldEnd(true);
+        setEndCountdown(5);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to communicate with AI');
@@ -494,6 +542,44 @@ export default function AttemptPage() {
   const remaining = Math.max(0, timeLimitSeconds - duration);
   const hasStudentResponse = chat.some((m) => m.role === 'student');
 
+  useEffect(() => {
+    if (
+      phase !== 'interview'
+      || !isRecording
+      || sending
+      || shouldEnd
+      || wrapUpRequested
+      || remaining > 30
+      || remaining <= 0
+    ) {
+      return;
+    }
+
+    setWrapUpRequested(true);
+    void sendAITurn(
+      'System note: 30 seconds remain. Please wrap up the interview with concise final prompts.',
+      { skipStudentChat: true, timerWrapUp: true }
+    );
+  }, [phase, isRecording, sending, shouldEnd, wrapUpRequested, remaining]);
+
+  useEffect(() => {
+    if (phase !== 'interview' || endCountdown === null) return;
+
+    if (endCountdown <= 0) {
+      if (!hasStartedAutoSubmitRef.current) {
+        hasStartedAutoSubmitRef.current = true;
+        void handleSubmit();
+      }
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setEndCountdown((prev) => (prev === null ? null : prev - 1));
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [endCountdown, phase, handleSubmit]);
+
   // ======== CONSENT GATE ========
   if (phase === 'consent') {
     return (
@@ -621,11 +707,16 @@ export default function AttemptPage() {
           <span className={`text-sm font-mono ${remaining < 60 ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
             {formatTime(remaining)} remaining
           </span>
-            {!isFullscreen && (
-              <span className="text-xs text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded">
-                Fullscreen required
-              </span>
-            )}
+          {!isFullscreen && (
+            <span className="text-xs text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded">
+              Fullscreen required
+            </span>
+          )}
+          {isMultiMonitorDetected && (
+            <span className="text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded">
+              Multi-monitor detected (flagged)
+            </span>
+          )}
         </div>
         <button
           onClick={handleSubmit}
@@ -690,7 +781,7 @@ export default function AttemptPage() {
           <div className="border-t border-gray-200 bg-white p-4">
             {shouldEnd && (
               <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-700">
-                The interviewer has indicated the session should end. You can submit now.
+                The interviewer is wrapping up. Auto-submit in {endCountdown ?? 0}s.
               </div>
             )}
             {!isFullscreen && (
@@ -702,6 +793,11 @@ export default function AttemptPage() {
                 >
                   Re-enter Fullscreen
                 </button>
+              </div>
+            )}
+            {isMultiMonitorDetected && (
+              <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                Multiple monitors were detected. This session has been flagged for instructor review.
               </div>
             )}
             {error && (
@@ -724,7 +820,7 @@ export default function AttemptPage() {
               {!isListening ? (
                 <button
                   onClick={startListening}
-                  disabled={!isRecording || sending || !speechSupported || !isFullscreen}
+                  disabled={!isRecording || sending || !speechSupported || !isFullscreen || shouldEnd}
                   className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 transition"
                 >
                   Speak
@@ -739,7 +835,7 @@ export default function AttemptPage() {
               )}
               <button
                 onClick={handleSendMessage}
-                disabled={!isRecording || sending || isListening || !speechDraft.trim() || !isFullscreen}
+                disabled={!isRecording || sending || isListening || !speechDraft.trim() || !isFullscreen || shouldEnd}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition self-end"
               >
                 Send

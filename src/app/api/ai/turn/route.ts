@@ -6,11 +6,19 @@ import { validateInterviewTurn } from '@/lib/ai/validate';
 
 export async function POST(req: NextRequest) {
   try {
-    const { attemptId, studentMessage } = await req.json();
+    const { attemptId, studentMessage, timerWrapUp } = await req.json();
 
-    if (!attemptId || !studentMessage) {
-      return NextResponse.json({ error: 'attemptId and studentMessage required' }, { status: 400 });
+    if (!attemptId || (!studentMessage && !timerWrapUp)) {
+      return NextResponse.json(
+        { error: 'attemptId and either studentMessage or timerWrapUp required' },
+        { status: 400 }
+      );
     }
+
+    const isTimerWrapUp = Boolean(timerWrapUp);
+    const effectiveStudentMessage = isTimerWrapUp
+      ? 'System note: About 30 seconds remain. Please wrap up the interview now.'
+      : String(studentMessage);
 
     const supabase = getServiceSupabase();
 
@@ -58,17 +66,19 @@ export async function POST(req: NextRequest) {
       integritySummary[e.event_type] = (integritySummary[e.event_type] || 0) + 1;
     });
 
-    // Save student message to transcript first
-    await supabase
-      .from('transcript_messages')
-      .insert({ attempt_id: attemptId, role: 'student', content: studentMessage });
+    // Save student message to transcript first (skip for timer wrap-up signal)
+    if (!isTimerWrapUp) {
+      await supabase
+        .from('transcript_messages')
+        .insert({ attempt_id: attemptId, role: 'student', content: effectiveStudentMessage });
+    }
 
     const transcript = [
       ...(messages || []).map((m: { role: string; content: string }) => ({
         role: m.role,
         content: m.content,
       })),
-      { role: 'student', content: studentMessage },
+      ...(isTimerWrapUp ? [{ role: 'system', content: effectiveStudentMessage }] : [{ role: 'student', content: effectiveStudentMessage }]),
     ];
 
     const questionBank = assignment.question_bank as { selected_problem?: Record<string, unknown> } | null;
@@ -86,7 +96,7 @@ export async function POST(req: NextRequest) {
       selected_problem: questionBank?.selected_problem || {},
       state: attempt.ai_state,
       transcript,
-      student_message: studentMessage,
+      student_message: effectiveStudentMessage,
       integrity_summary: integritySummary,
     });
 
