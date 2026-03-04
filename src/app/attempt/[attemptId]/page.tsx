@@ -9,7 +9,8 @@ import { supabase } from '@/lib/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Video, Mic, AlertTriangle, Send, CheckCircle2, Clock,
-  MessageSquare, UserCircle, ShieldAlert, Sparkles, Loader2, Maximize, StopCircle
+  MessageSquare, UserCircle, ShieldAlert, Sparkles, Loader2, Maximize, StopCircle,
+  Volume2, VolumeX
 } from 'lucide-react';
 
 type Phase = 'consent' | 'interview' | 'uploading' | 'finalizing' | 'done';
@@ -70,6 +71,7 @@ export default function AttemptPage() {
   const [wrapUpRequested, setWrapUpRequested] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMultiMonitorDetected, setIsMultiMonitorDetected] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -140,6 +142,51 @@ export default function AttemptPage() {
 
     setSpeechSupported(Boolean(SpeechRecognitionCtor));
   }, []);
+
+  const speak = useCallback((text: string) => {
+    if (!isVoiceEnabled || typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    // Strip basic markdown for cleaner synthesis
+    const cleanText = text
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/\$/g, '') // Remove ALL dollar signs to prevent "dollar" pronunciation
+      .replace(/\\/g, '') // Remove ALL backslashes
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = 'en-US';
+
+    // Try to find a female voice
+    const voices = window.speechSynthesis.getVoices();
+    // Preferred order: specific high-quality female voices, then any with "female" in name, then any "en-US"
+    const femaleVoice = voices.find(v => v.name === 'Google US English' || v.name === 'Microsoft Zira - English (United States)')
+      || voices.find(v => v.name.toLowerCase().includes('female'))
+      || voices.find(v => v.lang === 'en-US' && v.name.toLowerCase().includes('zira'))
+      || voices.find(v => v.lang === 'en-US');
+
+    if (femaleVoice) {
+      utterance.voice = femaleVoice;
+    }
+
+    utterance.rate = 1.0;
+    utterance.pitch = 1.1; // Slightly higher pitch for a more female tone if needed
+    window.speechSynthesis.speak(utterance);
+  }, [isVoiceEnabled]);
+
+  // Cleanup speech on unmount or phase change
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [phase]);
 
   // Time limit enforcement
   useEffect(() => {
@@ -358,6 +405,7 @@ export default function AttemptPage() {
       if (!res.ok) throw new Error(data.error);
 
       setChat((prev) => [...prev, { role: 'ai', content: data.ai_message }]);
+      speak(data.ai_message);
 
       if (data.should_end) {
         const shouldAutoSubmit = remaining > 30;
@@ -373,6 +421,12 @@ export default function AttemptPage() {
                 : 'I am wrapping up this assessment now. Please click **Submit Assessment** before time runs out.',
             },
           ]);
+
+          speak(
+            shouldAutoSubmit
+              ? 'I am wrapping up this assessment now. Your submission will be auto-submitted in 10 seconds.'
+              : 'I am wrapping up this assessment now. Please click Submit Assessment before time runs out.'
+          );
         }
 
         setShouldEnd(true);
@@ -394,6 +448,7 @@ export default function AttemptPage() {
     const msg = speechDraft.trim();
     setSpeechDraft('');
     finalTranscriptRef.current = '';
+    window.speechSynthesis?.cancel();
     void sendAITurn(msg);
   }
 
@@ -415,6 +470,7 @@ export default function AttemptPage() {
 
     setError('');
     finalTranscriptRef.current = speechDraft.trim();
+    window.speechSynthesis?.cancel();
 
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
@@ -754,6 +810,21 @@ export default function AttemptPage() {
               {formatTime(remaining)}
             </span>
           </div>
+
+          <button
+            onClick={() => {
+              const next = !isVoiceEnabled;
+              setIsVoiceEnabled(next);
+              if (!next) window.speechSynthesis?.cancel();
+            }}
+            className={`p-2 rounded-lg border transition-colors ${isVoiceEnabled
+              ? 'bg-slate-800 border-slate-700 text-sky-400 hover:text-sky-300'
+              : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-400'
+              }`}
+            title={isVoiceEnabled ? 'Mute AI Voice' : 'Unmute AI Voice'}
+          >
+            {isVoiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+          </button>
 
           <button
             onClick={handleSubmit}
