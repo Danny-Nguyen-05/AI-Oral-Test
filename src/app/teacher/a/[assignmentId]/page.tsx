@@ -175,17 +175,25 @@ export default function AssignmentDetail() {
       return;
     }
 
+    // Check for duplicate title
+    const isDuplicate = questions.some((q, idx) =>
+      idx !== activeQuestionIndex &&
+      q.title.toLowerCase().trim() === draft.title.toLowerCase().trim()
+    );
+
+    if (isDuplicate) {
+      setError('A question with this title already exists in the bank.');
+      return;
+    }
+
     setSaving(true);
     setError('');
 
     const updatedQuestions = [...questions];
-    let savedIndex = activeQuestionIndex;
-
     if (activeQuestionIndex !== null && updatedQuestions[activeQuestionIndex]) {
       updatedQuestions[activeQuestionIndex] = draft;
     } else {
       updatedQuestions.push(draft);
-      savedIndex = updatedQuestions.length - 1;
     }
 
     const { error: uErr } = await supabase
@@ -200,11 +208,7 @@ export default function AssignmentDetail() {
     }
 
     setQuestions(updatedQuestions);
-    setHasUnsavedQuestionDraft(false);
-
-    if (savedIndex === null || savedIndex < 0) {
-      openQuestionForEdit(updatedQuestions.length - 1, updatedQuestions);
-    }
+    resetDraft(); // Clear all boxes after successful save
 
     setSuccess('Question saved to bank successfully.');
     setSaving(false);
@@ -316,8 +320,8 @@ export default function AssignmentDetail() {
             <button
               onClick={handlePublish}
               className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm ${assignment.published
-                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200/50'
-                  : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
+                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200/50'
+                : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
                 }`}
             >
               {assignment.published ? (
@@ -427,8 +431,8 @@ export default function AssignmentDetail() {
                       key={q.id}
                       onClick={() => openQuestionForEdit(i)}
                       className={`w-full text-left p-4 rounded-xl border transition-all ${activeQuestionIndex === i && !hasUnsavedQuestionDraft
-                          ? 'bg-white border-sky-300 shadow-sm shadow-sky-100 ring-1 ring-sky-300'
-                          : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
+                        ? 'bg-white border-sky-300 shadow-sm shadow-sky-100 ring-1 ring-sky-300'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
                         }`}
                     >
                       <h3 className={`font-medium text-sm line-clamp-2 ${activeQuestionIndex === i && !hasUnsavedQuestionDraft ? 'text-sky-900' : 'text-slate-700'}`}>
