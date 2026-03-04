@@ -224,31 +224,38 @@ export default function AttemptDetail() {
 
                     {rubricBreakdown.length > 0 && (
                       <div className="space-y-4 pt-4 border-t border-slate-100">
-                        {rubricBreakdown.map((item, i) => (
-                          <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl p-4">
-                            <div className="flex justify-between items-center mb-2">
-                              <span className="font-semibold text-slate-700 text-sm">{item.category}</span>
-                              <span className="text-sm font-bold text-slate-800">
-                                {item.score}<span className="text-slate-400 font-normal">/{item.weight} pts</span>
-                              </span>
-                            </div>
-                            <div className="w-full bg-slate-200 rounded-full h-1.5 mb-3">
-                              <div
-                                className="bg-sky-500 h-1.5 rounded-full"
-                                style={{ width: `${(item.score / item.weight) * 100}%` }}
-                              />
-                            </div>
-                            <p className="text-sm text-slate-600 leading-relaxed mb-3">{item.rationale}</p>
-                            {item.evidence_quotes?.length > 0 && (
-                              <div className="space-y-1.5 mt-2 p-3 bg-white rounded-lg border border-slate-100 text-xs">
-                                <p className="font-semibold text-slate-500 mb-1">Evidence Quotes:</p>
-                                {item.evidence_quotes.map((q, j) => (
-                                  <p key={j} className="text-slate-600 italic border-l-2 border-sky-200 pl-2 py-0.5">&ldquo;{q}&rdquo;</p>
-                                ))}
+                        {rubricBreakdown.map((item, i) => {
+                          // Handle cases where AI might have returned percentage (0-100) instead of points (0-weight)
+                          const normalizedScore = item.score > item.weight
+                            ? (item.score / 100) * item.weight
+                            : item.score;
+
+                          return (
+                            <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="font-semibold text-slate-700 text-sm">{item.category}</span>
+                                <span className="text-sm font-bold text-slate-800">
+                                  {normalizedScore.toFixed(1)}<span className="text-slate-400 font-normal">/{item.weight} pts</span>
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        ))}
+                              <div className="w-full bg-slate-200 rounded-full h-1.5 mb-3">
+                                <div
+                                  className="bg-sky-500 h-1.5 rounded-full"
+                                  style={{ width: `${(normalizedScore / item.weight) * 100}%` }}
+                                />
+                              </div>
+                              <p className="text-sm text-slate-600 leading-relaxed mb-3">{item.rationale}</p>
+                              {item.evidence_quotes?.length > 0 && (
+                                <div className="space-y-1.5 mt-2 p-3 bg-white rounded-lg border border-slate-100 text-xs">
+                                  <p className="font-semibold text-slate-500 mb-1">Evidence Quotes:</p>
+                                  {item.evidence_quotes.map((q, j) => (
+                                    <p key={j} className="text-slate-600 italic border-l-2 border-sky-200 pl-2 py-0.5">&ldquo;{q}&rdquo;</p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </>

@@ -1,12 +1,30 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle2, ShieldCheck, Mail } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, Mail, Loader2 } from 'lucide-react';
 
 export default function AttemptDone() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const attemptId = params.attemptId as string;
+  const triggerGrading = searchParams.get('triggerGrading') === 'true';
+  const hasTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (triggerGrading && !hasTriggeredRef.current) {
+      hasTriggeredRef.current = true;
+      // Fire and forget finalize call
+      fetch('/api/ai/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId }),
+      }).catch(err => {
+        console.error('Background grading trigger failed:', err);
+      });
+    }
+  }, [attemptId, triggerGrading]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 relative overflow-hidden p-6">
@@ -26,15 +44,20 @@ export default function AttemptDone() {
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ delay: 0.2, type: 'spring', stiffness: 200, damping: 15 }}
-          className="w-24 h-24 bg-emerald-50 rounded-full flex flex-col items-center justify-center mx-auto mb-8 border-4 border-emerald-100 shadow-sm"
+          className="w-24 h-24 bg-emerald-50 rounded-full flex flex-col items-center justify-center mx-auto mb-8 border-4 border-emerald-100 shadow-sm relative"
         >
           <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+          {triggerGrading && (
+            <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 shadow-md border border-slate-100">
+              <Loader2 className="w-5 h-5 text-sky-500 animate-spin" />
+            </div>
+          )}
         </motion.div>
 
         <h1 className="text-3xl font-extrabold text-slate-900 mb-4 tracking-tight">Assessment Submitted</h1>
 
         <p className="text-slate-600 text-base leading-relaxed mb-8">
-          Your video recording, audio transcript, and responses have been successfully uploaded and processed. Your instructor has been notified.
+          Your video recording and responses have been successfully uploaded. {triggerGrading ? "We are now finalizing your AI assessment in the background." : "Your submission is being processed."}
         </p>
 
         <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-left space-y-4 mb-8">
@@ -48,8 +71,8 @@ export default function AttemptDone() {
           <div className="flex items-start gap-3">
             <Mail className="w-5 h-5 text-sky-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-bold text-slate-800">Pending Review</p>
-              <p className="text-xs text-slate-500 mt-0.5">Your instructor will review your oral responses and final AI score.</p>
+              <p className="text-sm font-bold text-slate-800">Review in Progress</p>
+              <p className="text-xs text-slate-500 mt-0.5">The AI is calculating your scores, which will be available to your instructor shortly.</p>
             </div>
           </div>
         </div>

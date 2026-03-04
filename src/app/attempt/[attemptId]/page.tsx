@@ -72,6 +72,7 @@ export default function AttemptPage() {
   const [isMultiMonitorDetected, setIsMultiMonitorDetected] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recordingBlobRef = useRef<Blob | null>(null);
   const speechRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -80,6 +81,7 @@ export default function AttemptPage() {
   const hasLoggedFullscreenExitRef = useRef(false);
   const hasAnnouncedEndRef = useRef(false);
   const hasStartedAutoSubmitRef = useRef(false);
+  const durationRef = useRef(0);
 
   const { isRecording, duration, stream, startRecording, stopRecording, requestPermissions, hasPermissions } =
     useRecording({ onError: (e) => setError(e) });
@@ -109,12 +111,22 @@ export default function AttemptPage() {
     if (stream && videoRef.current) {
       videoRef.current.srcObject = stream;
     }
-  }, [stream]);
+  }, [stream, phase]);
 
   // Auto-scroll chat
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chat]);
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [chat, sending]);
+
+  // Sync duration to ref for use in stable callbacks
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
 
   // Speech recognition support check
   useEffect(() => {
@@ -510,7 +522,7 @@ export default function AttemptPage() {
           attemptId,
           assignmentId,
           storagePath,
-          recordingDurationSeconds: duration,
+          recordingDurationSeconds: durationRef.current,
           recordingSizeBytes: blob.size,
         }),
       });
@@ -519,29 +531,16 @@ export default function AttemptPage() {
       if (!res.ok) throw new Error(data.error);
 
       setUploadProgress(100);
-      setPhase('finalizing');
-
-      const finalRes = await fetch('/api/ai/finalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attemptId }),
-      });
-
-      const finalData = await finalRes.json();
-      if (!finalRes.ok) throw new Error(finalData.error);
-
-      setPhase('done');
-      router.push(`/attempt/${attemptId}/done`);
+      router.push(`/attempt/${attemptId}/done?triggerGrading=true`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
       setPhase('interview');
       await updateStatus('recording_failed').catch(() => { });
-    } finally {
       if (progressInterval) {
         clearInterval(progressInterval);
       }
     }
-  }, [attemptId, phase, stopRecording, router, duration]);
+  }, [attemptId, phase, stopRecording, router]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -806,7 +805,10 @@ export default function AttemptPage() {
         <div className="flex-1 flex flex-col min-w-0 bg-white relative">
 
           {/* Chat Transcript */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 space-y-6">
+          <div
+            ref={chatContainerRef}
+            className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 space-y-6"
+          >
             <AnimatePresence>
               {chat.map((msg, i) => (
                 <motion.div
@@ -823,8 +825,8 @@ export default function AttemptPage() {
                     </div>
 
                     <div className={`p-4 rounded-2xl shadow-sm border ${msg.role === 'ai'
-                        ? 'bg-white border-slate-200 rounded-tl-none'
-                        : 'bg-sky-600 text-white border-sky-500 rounded-tr-none'
+                      ? 'bg-white border-slate-200 rounded-tl-none'
+                      : 'bg-sky-600 text-white border-sky-500 rounded-tr-none'
                       }`}
                     >
                       <div className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${msg.role === 'ai' ? 'text-sky-600' : 'text-sky-200'}`}>
@@ -905,8 +907,8 @@ export default function AttemptPage() {
                     rows={3}
                     disabled
                     className={`w-full px-4 py-3 rounded-xl text-sm resize-none transition-all outline-none border ${isListening
-                        ? 'bg-sky-50 border-sky-300 ring-2 ring-sky-500/20 text-slate-800'
-                        : 'bg-white border-slate-300 text-slate-600 shadow-inner'
+                      ? 'bg-sky-50 border-sky-300 ring-2 ring-sky-500/20 text-slate-800'
+                      : 'bg-white border-slate-300 text-slate-600 shadow-inner'
                       }`}
                   />
                   {isListening && (
