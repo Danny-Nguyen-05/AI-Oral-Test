@@ -262,7 +262,7 @@ export default function AttemptPage() {
 
   // Best-effort multi-monitor detection
   useEffect(() => {
-    if (phase !== 'interview') return;
+    if (phase === 'uploading' || phase === 'finalizing' || phase === 'done') return;
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -355,6 +355,24 @@ export default function AttemptPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ attemptId, status, ...extras }),
     });
+  }
+
+  async function handleRequestPermissions() {
+    const ok = await requestPermissions();
+    if (ok) {
+      // Also request window management permission if supported
+      const windowWithDetails = window as Window & {
+        getScreenDetails?: () => Promise<unknown>;
+      };
+      if (typeof windowWithDetails.getScreenDetails === 'function') {
+        try {
+          // Pre-trigger the permission prompt if needed
+          await windowWithDetails.getScreenDetails();
+        } catch (e) {
+          console.error('Screen details permission denied or failed:', e);
+        }
+      }
+    }
   }
 
   async function requestFullscreenMode() {
@@ -690,7 +708,7 @@ export default function AttemptPage() {
                   </div>
                   <p className="text-sm text-sky-100 mb-4 font-medium">We need access to your camera and microphone for this oral assessment.</p>
                   <button
-                    onClick={requestPermissions}
+                    onClick={handleRequestPermissions}
                     className="w-full py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition font-semibold text-sm shadow-lg shadow-sky-600/20"
                   >
                     Grant Access
