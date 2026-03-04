@@ -151,12 +151,15 @@ export default function AttemptPage() {
 
     // Strip basic markdown for cleaner synthesis
     const cleanText = text
-      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*\*(.*?)\*\*/g, '$1') // Stem bold/italics
       .replace(/\*(.*?)\*/g, '$1')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-      .replace(/#{1,6}\s/g, '')
-      .replace(/\$/g, '') // Remove ALL dollar signs to prevent "dollar" pronunciation
-      .replace(/\\/g, '') // Remove ALL backslashes
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Link text only
+      .replace(/#{1,6}\s/g, '') // Headings
+      .replace(/[`"'']/g, '') // Remove all types of quotes and backticks
+      .replace(/\$/g, '') // Remove dollar signs
+      .replace(/\\/g, '') // Remove backslashes
+      .replace(/[<>|]/g, ' ') // Replace bracket signs with space
+      .replace(/\s+/g, ' ') // Collapse extra spaces
       .trim();
 
     const utterance = new SpeechSynthesisUtterance(cleanText);
