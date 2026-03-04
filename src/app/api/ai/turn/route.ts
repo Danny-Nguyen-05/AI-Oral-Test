@@ -4,6 +4,8 @@ import { callAI } from '@/lib/ai/provider';
 import { INTERVIEWER_SYSTEM_PROMPT, buildInterviewerUserMessage } from '@/lib/ai/prompts';
 import { validateInterviewTurn } from '@/lib/ai/validate';
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { attemptId, studentMessage, timerWrapUp } = await req.json();
