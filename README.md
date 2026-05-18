@@ -56,7 +56,7 @@ The platform enforces fullscreen mode, detects multi-monitor setups, and logs in
 The entire session is recorded and uploaded to Supabase Storage. Teachers can watch it back alongside the transcript.
 
 **Teacher Dashboard**
-Full assignment management: create, edit, publish/unpublish, browse submissions, view scores, and override AI grades with a note.
+Full assignment management: create, edit, publish/unpublish, delete (with cascade cleanup of all student submissions, recordings, and transcripts), browse submissions, view scores, and override AI grades with a note.
 
 ---
 
@@ -94,8 +94,13 @@ src/
 │   ├── a/[assignmentId]/          # Student entry page
 │   ├── attempt/[attemptId]/       # Live interview + done screen
 │   ├── teacher/                   # Dashboard, assignment editor, submission viewer
-│   └── api/                       # Server-side API routes (AI, student actions)
+│   └── api/
+│       ├── ai/                    # AI interview turn, question generation, grading
+│       ├── student/               # Student actions: attempt creation, recording upload, status updates
+│       └── teacher/
+│           └── deleteAssignment/  # Deletes assignment + cascades to attempts, transcripts, integrity events, and storage recordings
 ├── components/
+│   ├── ConfirmDialog.tsx          # Reusable confirmation modal (used for destructive actions)
 │   └── MarkdownMessage.tsx        # Renders AI messages with math support
 ├── hooks/
 │   ├── useRecording.ts            # MediaRecorder abstraction
