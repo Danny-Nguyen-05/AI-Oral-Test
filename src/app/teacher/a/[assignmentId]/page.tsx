@@ -5,10 +5,11 @@ import { supabase } from '@/lib/supabase/client';
 import { useRouter, useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Users, Settings, Share2, Plus, Wand2, Sparkles,
+  ArrowLeft, Users, Share2, Plus, Wand2, Sparkles,
   Save, Trash2, CheckCircle2, Clock, BarChart2, Check, Copy
 } from 'lucide-react';
 import type { Assignment, SelectedProblem, QuestionBank } from '@/lib/types';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 function normalizeQuestions(questionBank: QuestionBank | null): SelectedProblem[] {
   if (!questionBank) return [];
@@ -33,6 +34,8 @@ export default function AssignmentDetail() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [questions, setQuestions] = useState<SelectedProblem[]>([]);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState<number | null>(null);
@@ -288,6 +291,28 @@ export default function AssignmentDetail() {
     );
   }
 
+  async function handleDeleteAssignment() {
+    setDeleting(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/teacher/deleteAssignment', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ assignmentId }),
+    });
+
+    if (res.ok) {
+      router.push('/teacher/dashboard');
+    } else {
+      const data = await res.json();
+      setError(data.error || 'Failed to delete assignment');
+      setDeleting(false);
+      setShowDeleteDialog(false);
+    }
+  }
+
   const studentLink = `${typeof window !== 'undefined' ? window.location.origin : ''}/a/${assignmentId}`;
 
   const copyLink = async () => {
@@ -298,6 +323,16 @@ export default function AssignmentDetail() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
+      <ConfirmDialog
+        open={showDeleteDialog}
+        title="Delete Assignment"
+        description={`Are you sure you want to delete "${assignment.title}"? This will permanently remove all student submissions, recordings, and transcripts. This cannot be undone.`}
+        confirmLabel="Delete Assignment"
+        onConfirm={handleDeleteAssignment}
+        onCancel={() => setShowDeleteDialog(false)}
+        loading={deleting}
+      />
+
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -316,6 +351,13 @@ export default function AssignmentDetail() {
             >
               <Users className="w-4 h-4" />
               Submissions
+            </button>
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="px-4 py-2 border border-red-200 text-red-600 bg-white hover:bg-red-50 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
             </button>
             <button
               onClick={handlePublish}

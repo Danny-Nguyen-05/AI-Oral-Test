@@ -5,12 +5,15 @@ import { supabase } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Plus, LogOut, FileText, Clock, BarChart2, CheckCircle2, CircleDashed } from 'lucide-react';
+import { Plus, LogOut, FileText, Clock, BarChart2, CheckCircle2, CircleDashed, Trash2 } from 'lucide-react';
 import type { Assignment } from '@/lib/types';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 export default function TeacherDashboard() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -38,6 +41,28 @@ export default function TeacherDashboard() {
     router.push('/teacher/login');
   }
 
+  async function handleDeleteConfirm() {
+    if (!deleteTargetId) return;
+    setDeleting(true);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/teacher/deleteAssignment', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ assignmentId: deleteTargetId }),
+    });
+
+    if (res.ok) {
+      setAssignments((prev) => prev.filter((a) => a.id !== deleteTargetId));
+    }
+
+    setDeleting(false);
+    setDeleteTargetId(null);
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -49,8 +74,19 @@ export default function TeacherDashboard() {
     );
   }
 
+  const deleteTarget = assignments.find((a) => a.id === deleteTargetId);
+
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
+      <ConfirmDialog
+        open={!!deleteTargetId}
+        title="Delete Assignment"
+        description={`Are you sure you want to delete "${deleteTarget?.title}"? This will permanently remove all student submissions, recordings, and transcripts. This cannot be undone.`}
+        confirmLabel="Delete Assignment"
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTargetId(null)}
+        loading={deleting}
+      />
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -157,6 +193,13 @@ export default function TeacherDashboard() {
                   >
                     Submissions
                   </Link>
+                  <button
+                    onClick={(e) => { e.preventDefault(); setDeleteTargetId(a.id); }}
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
+                    title="Delete assignment"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </motion.div>
             ))}
